@@ -1,13 +1,15 @@
 class Config:
 
-    MODEL_NAME = 'gpt-4-32k'
-    MODEL_VERSION = '2024-05-01-preview'
-    MODEL_URL = 'https://itappsopenaichn.openai.azure.com/'
+    MODEL_NAME = 'gpt-3.5-turbo'
+    MODEL_VERSION = ''
+    MODEL_URL = ''
     MODEL_API_KEY = ''
-    MODEL_MAX_TOKENS = 32000
+    MODEL_MAX_TOKENS = 8192
 
-    IMAGING_URL = 'http://localhost:5000/'
+    IMAGING_URL = ''
     IMAGING_API_KEY = ''
+
+    GITHUB_TOKEN = ''
 
 
     
