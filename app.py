@@ -40,19 +40,19 @@ warnings.filterwarnings(
     message="`clean_up_tokenization_spaces` was not set.*",
 )
 
-# Define OpenAI model sizes using a dictionary
-ai_model_sizes = {
-    "gpt-4-turbo-preview": 128000,
-    "gpt-4": 8192,
-    "gpt-4-32k": 32768,
-    "donotshare": 32768,
-    "chatgpt432k": 32768,
-    "mmc-tech-gpt-35-turbo": 8192,
-    "mmc-tech-gpt-35-turbo-smart-latest": 8192,
-    "gpt-3.5-turbo": 4096,
-    "gpt-3.5-turbo-16k": 16384,
-    "codellama": 100000
-}
+# # Define OpenAI model sizes using a dictionary
+# ai_model_sizes = {
+#     "gpt-4-turbo-preview": 128000,
+#     "gpt-4": 8192,
+#     "gpt-4-32k": 32768,
+#     "donotshare": 32768,
+#     "chatgpt432k": 32768,
+#     "mmc-tech-gpt-35-turbo": 8192,
+#     "mmc-tech-gpt-35-turbo-smart-latest": 8192,
+#     "gpt-3.5-turbo": 4096,
+#     "gpt-3.5-turbo-16k": 16384,
+#     "codellama": 100000
+# }
 
 def fix_common_json_issues(json_string):
     """
@@ -182,7 +182,7 @@ def count_chatgpt_tokens(ai_model_name, prompt):
     # Return the total number of tokens in the prompt.
     return len(tokens)
 
-def replace_code(file_path, start_line, end_line, new_code):
+def replace_code(file_path, start_line, end_line, new_code, object_id):
     """
     Replaces lines of code in a file between specified start and end lines with the provided new code.
 
@@ -215,16 +215,19 @@ def replace_code(file_path, start_line, end_line, new_code):
             file.writelines(updated_lines)
 
         # Print a success message indicating the range of lines that were replaced.
-        print(f"Code between lines {start_line} and {end_line} replaced successfully.")
+        print(f"Code between lines {start_line} and {end_line} replaced successfully for the ObjectID - {object_id} inside file -> {file_path}")
 
     except Exception as e:
         # Catch and print any errors that occur during file handling or code replacement.
         print(f"An error occurred: {e}")
 
-def gen_code_connected_json(ApplicationName, TenantName, RequestId, IssueID, ObjectID, PromptContent, ai_model_name, ai_model_version,  ai_model_url, ai_model_api_key, ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory):
+def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, RequestId, IssueID, ObjectID, PromptContent,
+                                ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
+                                ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
+                            ):
     
     # Set the AI model size, defaulting to 4096 if not specified
-    ai_model_size = ai_model_sizes.get(ai_model_name, 4096)
+    ai_model_size = ai_model_max_tokens
 
     object_id = ObjectID  
     logging.info("---------------------------------------------------------------------------------------------------------------------------------------")
@@ -378,7 +381,7 @@ def gen_code_connected_json(ApplicationName, TenantName, RequestId, IssueID, Obj
         f"\nGUIDELINES:\nUse the following JSON structure to respond:\n'''\n{json_resp}\n'''\n" +
         (f"\nIMPACT ANALYSIS CONTEXT:\n{impact_text}\n{exception_text}\n" if impact_text or exception_text else "") +
         "\nMake sure your response is a valid JSON string.\nRespond only the JSON string, and only the JSON string. "
-        "Do not enclose the JSON string in triple quotes, backslashes, ... Do not add comments outside of the JSON structure."
+        "Do not enclose the JSON string in triple quotes, backslashes, ... Do not add comments outside of the JSON structure.\n"
     )
 
     # Clean up prompt content for formatting issues
@@ -407,20 +410,11 @@ def gen_code_connected_json(ApplicationName, TenantName, RequestId, IssueID, Obj
 
         # Check if the response indicates an update was made
         if response_content['updated'].lower() == 'yes':
-            # Prepare file path for the modified code
-            # if SourceCodeLocation.lower() in object_source_path.lower():
-            #     object_source_path = object_source_path.replace(SourceCodeLocation, '')
-            #     file_path = fixed_code_directory + object_source_path
-            try:
-                # Copy the file
-                shutil.copy(object_source_path, fixed_code_directory)
-                print(f'File copied from {object_source_path} to {fixed_code_directory}')
-            except FileNotFoundError:
-                print("Source file not found.")
-            except PermissionError:
-                print("Permission denied.")
-            except Exception as e:
-                print(f"An error occurred: {e}")
+
+
+            comment_str = '//'
+            comment =   f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
+
 
             new_code = response_content['code']  # Extract new code from the response
             # Convert the new_code string back to its readable format
@@ -428,8 +422,10 @@ def gen_code_connected_json(ApplicationName, TenantName, RequestId, IssueID, Obj
             start_line = object_start_line
             end_line = object_end_line
 
+            fixed_code_file = fixed_code_directory + object_source_path.split(RepoName)[-1]
+
             # Replace the old code with the new code in the specified file
-            replace_code(fixed_code_directory, start_line, end_line, readable_code)
+            replace_code(fixed_code_file, start_line, end_line, comment + readable_code, object_id)
 
         # Append the response to the result list
         return ({
@@ -515,6 +511,7 @@ def process_request(RequestId):
     ApplicationName = engine_input['applicationid']
     TenantName = engine_input['tenantid']
     RepoURL = engine_input['repo_url']
+    RepoName = RepoURL.split('/')[-1].replace('.git', '')
 
     # SourceCodeLocation = "C:\\ProgramData\\CAST\\AIP-Console-Standalone\\shared\\upload\\Webgoat\\main_sources\\"
 
@@ -526,7 +523,7 @@ def process_request(RequestId):
 
     # Define the output directory name based on the input parameters and timestamp
     # output_directory = f"{ApplicationName}"
-    output_directory = os.path.abspath(ApplicationName)
+    output_directory = os.path.abspath(f'output//{ApplicationName}')
 
     # Create the output directory; if it already exists, do nothing
     os.makedirs(output_directory, exist_ok=True)
@@ -541,8 +538,10 @@ def process_request(RequestId):
         # Define the directory for storing fixed source code
         fixed_code_directory = os.path.join(
             output_directory,
-            f"Fixed_SourceCode_for_IssueID-{IssueID}_{timestamp}"
+            f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
+            f"{RepoName}"
         )
+
         os.makedirs(fixed_code_directory, exist_ok=True)  # Create the directory for fixed source code
         print(f"Directory '{fixed_code_directory}' created successfully!")
 
@@ -559,7 +558,7 @@ def process_request(RequestId):
             print(f"Error during cloning: {e}")
 
         # Create a log filename based on the input parameters and timestamp
-        filename = f'Logs_for_IssueID-{IssueID}_{timestamp}.txt'
+        filename = f'Logs_for_IssueID_{IssueID}_timestamp_{timestamp}.txt'
 
         # Configure logging to write logs to the specified log file
         logging.basicConfig(
@@ -612,7 +611,7 @@ def process_request(RequestId):
 
                             # Call the gen_code_connected_json function to process the request and generate code updates
                             data = gen_code_connected_json(
-                                ApplicationName, TenantName, RepoURL, RequestId, IssueID, ObjectID, PromptContent,
+                                ApplicationName, TenantName, RepoURL, RepoName, RequestId, IssueID, ObjectID, PromptContent,
                                 ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
                                 ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
                             )
@@ -621,7 +620,7 @@ def process_request(RequestId):
 
         # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
         filename = output_directory + \
-            f'/AI_Response_for_IssueID-{IssueID}_{timestamp}.json'
+            f'/AI_Response_for_IssueID-{IssueID}_timestamp_{timestamp}.json'
 
         # Write the JSON response data to the specified file with pretty formatting
         with open(filename, 'w') as json_file:
