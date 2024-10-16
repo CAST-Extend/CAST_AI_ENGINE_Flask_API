@@ -40,19 +40,6 @@ warnings.filterwarnings(
     message="`clean_up_tokenization_spaces` was not set.*",
 )
 
-# # Define OpenAI model sizes using a dictionary
-# ai_model_sizes = {
-#     "gpt-4-turbo-preview": 128000,
-#     "gpt-4": 8192,
-#     "gpt-4-32k": 32768,
-#     "donotshare": 32768,
-#     "chatgpt432k": 32768,
-#     "mmc-tech-gpt-35-turbo": 8192,
-#     "mmc-tech-gpt-35-turbo-smart-latest": 8192,
-#     "gpt-3.5-turbo": 4096,
-#     "gpt-3.5-turbo-16k": 16384,
-#     "codellama": 100000
-# }
 
 def fix_common_json_issues(json_string):
     """
@@ -193,7 +180,7 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
     new_code (str): The new code that will replace the existing code between start_line and end_line.
 
     Returns:
-    None
+    int: updated_lines
     """
     
     try:
@@ -217,6 +204,8 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
         # Print a success message indicating the range of lines that were replaced.
         print(f"Code between lines {start_line} and {end_line} replaced successfully for the ObjectID - {object_id} inside file -> {file_path}")
 
+        return updated_lines
+
     except Exception as e:
         # Catch and print any errors that occur during file handling or code replacement.
         print(f"An error occurred: {e}")
@@ -225,6 +214,9 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
                                 ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
                                 ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
                             ):
+    
+    object_dictionary = { "objectid": ObjectID, "status": "", "message": ""}
+    content_info_dictionary =  { "filefullname": "", "filecontent": ""}
     
     # Set the AI model size, defaulting to 4096 if not specified
     ai_model_size = ai_model_max_tokens
@@ -411,10 +403,8 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
         # Check if the response indicates an update was made
         if response_content['updated'].lower() == 'yes':
 
-
             comment_str = '//'
             comment =   f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
-
 
             new_code = response_content['code']  # Extract new code from the response
             # Convert the new_code string back to its readable format
@@ -425,32 +415,28 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
             fixed_code_file = fixed_code_directory + object_source_path.split(RepoName)[-1]
 
             # Replace the old code with the new code in the specified file
-            replace_code(fixed_code_file, start_line, end_line, comment + readable_code, object_id)
+            updated_code = replace_code(fixed_code_file, start_line, end_line, comment + readable_code, object_id)
+
+            object_dictionary["status"] = "success"
+            object_dictionary["message"] = response_content['comment']
+
+            content_info_dictionary["filefullname"] = fixed_code_file
+            content_info_dictionary["filecontent"] = updated_code
+
+        else:
+            object_dictionary["status"] = "failure"
+            object_dictionary["message"] = response_content['comment']
 
         # Append the response to the result list
-        return ({
-            'prompt': prompt_content,
-            'response': response_content,
-            'source_path': object_source_path,
-            'object_id': object_id,
-            'line_start': object_start_line,
-            'line_end': object_end_line,
-            'technologies': object_technology,
-            'req_id': RequestId
-        })
+        return object_dictionary, content_info_dictionary
 
     else:
         logging.warning("Prompt too long; skipping.")  # Warn if the prompt exceeds limits
-        return ({
-            'prompt': prompt_content,
-            'response': "(NA prompt too long)",  # Indicate that the prompt was too long
-            'source_path': object_source_path,
-            'object_id': object_id,
-            'line_start': object_start_line,
-            'line_end': object_end_line,
-            'technologies': object_technology,
-            'req_id': RequestId
-        })
+
+        object_dictionary["status"] = "failure"
+        object_dictionary["message"] = "failed because of reason: prompt too long"
+
+        return object_dictionary, content_info_dictionary
 
 @app.route('/')
 def home():
@@ -477,9 +463,12 @@ def process_request(RequestId):
 
     # Get Request Information from Mongo DB
     engine_input = {
+                        "_id": {
+                            "$oid": "66fc114c01b7b08905f87889"
+                        },
                         "applicationid": "MER_-_CLNPAR_-_Client_Participation_Survey_Mgmt_System",
                         "tenantid": "default",
-                        "repo_url": "https://github.com/mmctech/mercer-cpsm.git",
+                        "repourl": "https://github.com/mmctech/mercer-cpsm.git",
                         "request": [
                             {
                             "requestid": "66fc114c01b7b08905f87999",
@@ -506,11 +495,12 @@ def process_request(RequestId):
                             }
                         ],
                         "createddate": "mmddyy HH:MM:SS"
-                    }
+                        }
 
+    MasterRequestID = engine_input['_id']['$oid']
     ApplicationName = engine_input['applicationid']
     TenantName = engine_input['tenantid']
-    RepoURL = engine_input['repo_url']
+    RepoURL = engine_input['repourl']
     RepoName = RepoURL.split('/')[-1].replace('.git', '')
 
     # SourceCodeLocation = "C:\\ProgramData\\CAST\\AIP-Console-Standalone\\shared\\upload\\Webgoat\\main_sources\\"
@@ -529,11 +519,23 @@ def process_request(RequestId):
     os.makedirs(output_directory, exist_ok=True)
     print(f"Directory '{output_directory}' created successfully!")
 
-    result = []  # Initialize result list to hold processed data
+    # result = []  # Initialize result list to hold processed data
 
     for request in engine_input['request']:
         RequestId = request['requestid']
         IssueID = request['issueid']
+
+        engine_output = {
+                            "_id": {
+                                "$oid": MasterRequestID
+                            },
+                            "requestid": RequestId,
+                            "issueid": IssueID,
+                            "objects": [],
+                            "contentinfo": [],
+                            "status": "partial success",
+                            "createddate": timestamp
+                        }
 
         # Define the directory for storing fixed source code
         fixed_code_directory = os.path.join(
@@ -610,13 +612,14 @@ def process_request(RequestId):
                             ObjectID = objectdetail['objectid']
 
                             # Call the gen_code_connected_json function to process the request and generate code updates
-                            data = gen_code_connected_json(
+                            object_data, contentinfo_data = gen_code_connected_json(
                                 ApplicationName, TenantName, RepoURL, RepoName, RequestId, IssueID, ObjectID, PromptContent,
                                 ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
                                 ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
                             )
 
-                            result.append(data)
+                            engine_output['objects'].append(object_data)
+                            engine_output['contentinfo'].append(contentinfo_data)
 
         # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
         filename = output_directory + \
@@ -624,9 +627,9 @@ def process_request(RequestId):
 
         # Write the JSON response data to the specified file with pretty formatting
         with open(filename, 'w') as json_file:
-            json.dump(result, json_file, indent=4)  # Save data as formatted JSON in the file
+            json.dump(engine_output, json_file, indent=4)  # Save data as formatted JSON in the file
 
-        return jsonify(result), 200  # Return JSON response with HTTP status code
+        return jsonify(engine_output), 200  # Return JSON response with HTTP status code
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
