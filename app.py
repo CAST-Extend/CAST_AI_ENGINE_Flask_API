@@ -419,8 +419,8 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
 
             object_dictionary["status"] = "success"
             object_dictionary["message"] = response_content['comment']
-
-            content_info_dictionary["filefullname"] = fixed_code_file
+            
+            content_info_dictionary["filefullname"] = RepoName + object_source_path.split(RepoName)[-1]
             content_info_dictionary["filecontent"] = updated_code
 
         else:
@@ -442,8 +442,8 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
 def home():
     return "Welcome to CAST AI ENGINE"
 
-@app.route('/ProcessRequest/<int:RequestId>')
-def process_request(RequestId):
+@app.route('/ProcessRequest/<string:Request_Id>')
+def process_request(Request_Id):
 
     model_invocation_delay = 10
 
@@ -466,13 +466,13 @@ def process_request(RequestId):
                         "_id": {
                             "$oid": "66fc114c01b7b08905f87889"
                         },
-                        "applicationid": "MER_-_CLNPAR_-_Client_Participation_Survey_Mgmt_System",
-                        "tenantid": "default",
-                        "repourl": "https://github.com/mmctech/mercer-cpsm.git",
                         "request": [
                             {
                             "requestid": "66fc114c01b7b08905f87999",
                             "issueid": 1200138,
+                            "applicationid": "MER_-_CLNPAR_-_Client_Participation_Survey_Mgmt_System",
+                            "tenantid": "default",
+                            "repourl": "https://github.com/mmctech/mercer-cpsm.git",
                             "requestdetail": [
                                 {
                                 "promptid": "670504f84594d67cd4750702",
@@ -495,13 +495,7 @@ def process_request(RequestId):
                             }
                         ],
                         "createddate": "mmddyy HH:MM:SS"
-                        }
-
-    MasterRequestID = engine_input['_id']['$oid']
-    ApplicationName = engine_input['applicationid']
-    TenantName = engine_input['tenantid']
-    RepoURL = engine_input['repourl']
-    RepoName = RepoURL.split('/')[-1].replace('.git', '')
+                    }
 
     # SourceCodeLocation = "C:\\ProgramData\\CAST\\AIP-Console-Standalone\\shared\\upload\\Webgoat\\main_sources\\"
 
@@ -511,125 +505,148 @@ def process_request(RequestId):
     # # Get the current datetime stamp for directory and file naming
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Define the output directory name based on the input parameters and timestamp
-    # output_directory = f"{ApplicationName}"
-    output_directory = os.path.abspath(f'output//{ApplicationName}')
-
-    # Create the output directory; if it already exists, do nothing
-    os.makedirs(output_directory, exist_ok=True)
-    print(f"Directory '{output_directory}' created successfully!")
-
     # result = []  # Initialize result list to hold processed data
 
     for request in engine_input['request']:
-        RequestId = request['requestid']
-        IssueID = request['issueid']
 
-        engine_output = {
-                            "_id": {
-                                "$oid": MasterRequestID
-                            },
-                            "requestid": RequestId,
-                            "issueid": IssueID,
-                            "objects": [],
-                            "contentinfo": [],
-                            "status": "partial success",
-                            "createddate": timestamp
-                        }
+        if request['requestid'] == Request_Id:
 
-        # Define the directory for storing fixed source code
-        fixed_code_directory = os.path.join(
-            output_directory,
-            f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
-            f"{RepoName}"
-        )
+            ApplicationName = request['applicationid']
+            TenantName = request['tenantid']
+            RepoURL = request['repourl']
+            RepoName = RepoURL.split('/')[-1].replace('.git', '')
+            RequestId = request['requestid']
+            IssueID = request['issueid']
 
-        os.makedirs(fixed_code_directory, exist_ok=True)  # Create the directory for fixed source code
-        print(f"Directory '{fixed_code_directory}' created successfully!")
+            # Define the output directory name based on the input parameters and timestamp
+            # output_directory = f"{ApplicationName}"
+            output_directory = os.path.abspath(f'output//{ApplicationName}')
 
-        repo_url_without_protocol = RepoURL.replace("https://", "")
-    
-        # Construct the authenticated repo URL
-        auth_repo_url = f"https://{github_token}@{repo_url_without_protocol}"
+            # Create the output directory; if it already exists, do nothing
+            os.makedirs(output_directory, exist_ok=True)
+            print(f"Directory '{output_directory}' created successfully!")
 
-        try:
-            print(f"Cloning into {fixed_code_directory}...")
-            subprocess.run(["git", "clone", auth_repo_url, fixed_code_directory], check=True)
-            print("Repository cloned successfully.")
-        except Exception as e:
-            print(f"Error during cloning: {e}")
+            engine_output = {
+                                "requestid": RequestId,
+                                "issueid": IssueID,
+                                "objects": [],
+                                "contentinfo": [],
+                                "status": "",
+                                "createddate": timestamp
+                            }
+            
+            objects_status_list = []
 
-        # Create a log filename based on the input parameters and timestamp
-        filename = f'Logs_for_IssueID_{IssueID}_timestamp_{timestamp}.txt'
+            # Define the directory for storing fixed source code
+            fixed_code_directory = os.path.join(
+                output_directory,
+                f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
+                f"{RepoName}"
+            )
 
-        # Configure logging to write logs to the specified log file
-        logging.basicConfig(
-            filename=os.path.join(current_directory, output_directory, filename),
-            level=logging.INFO,
-            format="%(asctime)s %(levelname)s: %(message)s",
-            filemode='w'  # Overwrite log file each time the script runs
-        )
+            os.makedirs(fixed_code_directory, exist_ok=True)  # Create the directory for fixed source code
+            print(f"Directory '{fixed_code_directory}' created successfully!")
 
-        for requestdetail in request['requestdetail']:
-            prompt_id = requestdetail['promptid']
-            #fetch based on IssueID
-            prompt_library = {
-                                "_id": {
-                                    "$oid": "670504114594d67cd4750700"
-                                },
-                                "applicationid": None,
-                                "issueid": 1200138,
-                                "issuename": "Green - Avoid instantiations inside loops",
-                                "prompttype": "generic",
-                                "technologies": [
-                                    {
-                                    "technology": "c#",
-                                    "prompts": [
-                                        {
-                                        "promptid": "670504f84594d67cd4750702",
-                                        "prompt": "Please refactor the code (written in C# language) to address the code review issue: Avoid instantiations inside loops. The intent is to initiate the variables outside the for loop.\n\nHere is a sample code that is following this practice\n\n\nint rateSetId = 0;\nstring planName= String.Empty;\nvar planDesign = null;\nfor (int i = 0; i < plans.Count; i++)\n{\n\trateSetId = plans.ElementAt(i).RateSetID;\n\tplanName = plans.ElementAt(i).RenewalsPlanName.Replace(\" -\", \"-\").Replace(\"- \", \"-\");\n\tplanDesign = new LookupManager().GetPlanDesign(planPeriodId, rateSetId, deliverableId);\n}"
-                                        }
-                                    ]
+            repo_url_without_protocol = RepoURL.replace("https://", "")
+        
+            # Construct the authenticated repo URL
+            auth_repo_url = f"https://{github_token}@{repo_url_without_protocol}"
+
+            try:
+                print(f"Cloning into {fixed_code_directory}...")
+                subprocess.run(["git", "clone", auth_repo_url, fixed_code_directory], check=True)
+                print("Repository cloned successfully.")
+            except Exception as e:
+                print(f"Error during cloning: {e}")
+
+            # Create a log filename based on the input parameters and timestamp
+            filename = f'Logs_for_IssueID_{IssueID}_timestamp_{timestamp}.txt'
+
+            # Configure logging to write logs to the specified log file
+            logging.basicConfig(
+                filename=os.path.join(current_directory, output_directory, filename),
+                level=logging.INFO,
+                format="%(asctime)s %(levelname)s: %(message)s",
+                filemode='w'  # Overwrite log file each time the script runs
+            )
+
+            for requestdetail in request['requestdetail']:
+                prompt_id = requestdetail['promptid']
+                #fetch based on IssueID
+                prompt_library = {
+                                    "_id": {
+                                        "$oid": "670504114594d67cd4750700"
                                     },
-                                    {
-                                    "technology": "javascript",
-                                    "prompts": [
+                                    "applicationid": None,
+                                    "issueid": 1200138,
+                                    "issuename": "Green - Avoid instantiations inside loops",
+                                    "prompttype": "generic",
+                                    "technologies": [
                                         {
-                                        "promptid": "670504114594d67cd4750708",
-                                        "prompt": "\"Act as a skilled software developer and programmer.\nIn the provided code, refactor the code to fix the following code review issue.\n\nCode Review Issue: Avoid instantiations inside loops\n\nEnsure to enhance performance and maintainability. Please fix the provided code and not the example code in the prompt. Use the example code as reference to fix the actual code\""
+                                        "technology": "c#",
+                                        "prompts": [
+                                            {
+                                            "promptid": "670504f84594d67cd4750702",
+                                            "prompt": "Please refactor the code (written in C# language) to address the code review issue: Avoid instantiations inside loops. The intent is to initiate the variables outside the for loop.\n\nHere is a sample code that is following this practice\n\n\nint rateSetId = 0;\nstring planName= String.Empty;\nvar planDesign = null;\nfor (int i = 0; i < plans.Count; i++)\n{\n\trateSetId = plans.ElementAt(i).RateSetID;\n\tplanName = plans.ElementAt(i).RenewalsPlanName.Replace(\" -\", \"-\").Replace(\"- \", \"-\");\n\tplanDesign = new LookupManager().GetPlanDesign(planPeriodId, rateSetId, deliverableId);\n}"
+                                            }
+                                        ]
+                                        },
+                                        {
+                                        "technology": "javascript",
+                                        "prompts": [
+                                            {
+                                            "promptid": "670504114594d67cd4750708",
+                                            "prompt": "\"Act as a skilled software developer and programmer.\nIn the provided code, refactor the code to fix the following code review issue.\n\nCode Review Issue: Avoid instantiations inside loops\n\nEnsure to enhance performance and maintainability. Please fix the provided code and not the example code in the prompt. Use the example code as reference to fix the actual code\""
+                                            }
+                                        ]
                                         }
-                                    ]
-                                    }
-                                ],
-                                "type": "Green Deficiency",
-                                "enabled": True
+                                    ],
+                                    "type": "Green Deficiency",
+                                    "enabled": True
                                 }
-            for technology in prompt_library['technologies']:
-                for prompt in technology['prompts']:
-                    if prompt_id == prompt['promptid']:
-                        PromptContent = prompt['prompt']
-                        for objectdetail in requestdetail['objectdetails']:
-                            ObjectID = objectdetail['objectid']
+                for technology in prompt_library['technologies']:
+                    for prompt in technology['prompts']:
+                        if prompt_id == prompt['promptid']:
+                            PromptContent = prompt['prompt']
+                            for objectdetail in requestdetail['objectdetails']:
+                                ObjectID = objectdetail['objectid']
 
-                            # Call the gen_code_connected_json function to process the request and generate code updates
-                            object_data, contentinfo_data = gen_code_connected_json(
-                                ApplicationName, TenantName, RepoURL, RepoName, RequestId, IssueID, ObjectID, PromptContent,
-                                ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
-                                ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
-                            )
+                                # Call the gen_code_connected_json function to process the request and generate code updates
+                                object_data, contentinfo_data = gen_code_connected_json(
+                                    ApplicationName, TenantName, RepoURL, RepoName, RequestId, IssueID, ObjectID, PromptContent,
+                                    ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
+                                    ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
+                                )
 
-                            engine_output['objects'].append(object_data)
-                            engine_output['contentinfo'].append(contentinfo_data)
+                                engine_output['objects'].append(object_data)
 
-        # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
-        filename = output_directory + \
-            f'/AI_Response_for_IssueID-{IssueID}_timestamp_{timestamp}.json'
+                                objects_status_list.append(object_data['status'])
 
-        # Write the JSON response data to the specified file with pretty formatting
-        with open(filename, 'w') as json_file:
-            json.dump(engine_output, json_file, indent=4)  # Save data as formatted JSON in the file
+                                if contentinfo_data["filefullname"] or contentinfo_data["filecontent"]:
+                                    engine_output['contentinfo'].append(contentinfo_data)
 
-        return jsonify(engine_output), 200  # Return JSON response with HTTP status code
+            # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
+            filename = output_directory + \
+                f'/AI_Response_for_IssueID-{IssueID}_timestamp_{timestamp}.json'
+            
+            if all(item == 'success' for item in objects_status_list):
+                engine_output['status'] = 'success'
+            elif all(item == 'failure' for item in objects_status_list):
+                engine_output['status'] = 'failure'
+            else:
+                engine_output['status'] = 'partial success'
+
+            # Write the JSON response data to the specified file with pretty formatting
+            with open(filename, 'w') as json_file:
+                json.dump(engine_output, json_file, indent=4)  # Save data as formatted JSON in the file
+
+            try:
+                shutil.rmtree(fixed_code_directory)
+                print(f"{fixed_code_directory} has been deleted.")
+            except OSError as e:
+                print(f"Error: {e.strerror}")
+
+            return jsonify(engine_output), 200  # Return JSON response with HTTP status code
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
