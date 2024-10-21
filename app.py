@@ -13,8 +13,8 @@ import tiktoken
 from openai import AzureOpenAI
 from datetime import datetime
 import warnings
-import pymongo
 from pymongo import MongoClient
+from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError
 
 
 app = Flask(__name__)
@@ -22,16 +22,18 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 # Access configuration variables
-ai_model_name = app.config['MODEL_NAME']
-ai_model_version = app.config['MODEL_VERSION']
-ai_model_url= app.config['MODEL_URL']
-ai_model_api_key = app.config['MODEL_API_KEY']
-ai_model_max_tokens = app.config['MODEL_MAX_TOKENS']
+ai_model_name = app.config["MODEL_NAME"]
+ai_model_version = app.config["MODEL_VERSION"]
+ai_model_url = app.config["MODEL_URL"]
+ai_model_api_key = app.config["MODEL_API_KEY"]
+ai_model_max_tokens = app.config["MODEL_MAX_TOKENS"]
 
-imaging_url = app.config['IMAGING_URL']
-imaging_api_key = app.config['IMAGING_API_KEY']
+imaging_url = app.config["IMAGING_URL"]
+imaging_api_key = app.config["IMAGING_API_KEY"]
 
-github_token = app.config['GITHUB_TOKEN']
+github_token = app.config["GITHUB_TOKEN"]
+
+mongo_uri = app.config["MONGODB_CONNECTION_STRING"]
 
 # Suppress specific FutureWarning
 warnings.filterwarnings(
@@ -53,21 +55,30 @@ def fix_common_json_issues(json_string):
     """
     # Replace actual newlines with escaped newlines (\n) to prevent JSON parsing errors.
     # JSON requires newlines to be escaped, but they might be present as actual newlines in the input.
-    json_string = json_string.replace('\n', '\\n')
+    json_string = json_string.replace("\n", "\\n")
 
     # Use a regular expression to escape double quotes that are not already escaped.
     # The regex (?<!\\)" looks for double quotes that are not preceded by a backslash, meaning they are not escaped.
     # We replace these unescaped quotes with an escaped version (\").
-    json_string = re.sub(r'(?<!\\)"', r'\"', json_string)
+    json_string = re.sub(r'(?<!\\)"', r"\"", json_string)
 
     # Return the modified JSON string with fixed formatting.
     return json_string
+
 
 # Constants like MAX_RETRIES and RETRY_DELAY should be defined outside the function
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # Delay in seconds between retries
 
-def ask_ai_model(messages, ai_model_url, ai_model_api_key, ai_model_version, ai_model_name, max_tokens):
+
+def ask_ai_model(
+    messages,
+    ai_model_url,
+    ai_model_api_key,
+    ai_model_version,
+    ai_model_name,
+    max_tokens,
+):
     """
     Sends a prompt to the AI model and retrieves a valid JSON response.
     Retries the request if an invalid JSON is received.
@@ -83,19 +94,14 @@ def ask_ai_model(messages, ai_model_url, ai_model_api_key, ai_model_version, ai_
     Returns:
     dict or None: The JSON response from the AI model if valid, otherwise None.
     """
-    
 
     # Prepare the payload for the AI API
-    payload = {
-        "model": ai_model_name,
-        "messages": messages,
-        "temperature": 0
-    }
+    payload = {"model": ai_model_name, "messages": messages, "temperature": 0}
 
     # Set up headers for the API request
     headers = {
         "Authorization": f"Bearer {ai_model_api_key}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     # Loop for retrying the request in case of errors or invalid JSON.
@@ -107,14 +113,16 @@ def ask_ai_model(messages, ai_model_url, ai_model_api_key, ai_model_version, ai_
 
             # Extract the AI model's response content (text) from the first choice.
             response_content = response.text
-            
+
             logging.info(f"AI Response (Attempt {attempt}): {response_content}")
 
             # Try to parse the AI response as JSON.
             try:
                 response_json = json.loads(response_content)
-                ai_response = response_json["choices"][0]["message"]["content"] 
-                ai_response = json.loads(ai_response) # Successfully parsed JSON, return it.
+                ai_response = response_json["choices"][0]["message"]["content"]
+                ai_response = json.loads(
+                    ai_response
+                )  # Successfully parsed JSON, return it.
                 return ai_response
             except json.JSONDecodeError as e:
                 # Log the JSON parsing error and prepare for retry if needed.
@@ -126,7 +134,9 @@ def ask_ai_model(messages, ai_model_url, ai_model_api_key, ai_model_version, ai_
                     time.sleep(RETRY_DELAY)
                 else:
                     # If max retries reached, log an error and return None.
-                    logging.error("Max retries reached. Failed to obtain valid JSON from AI.")
+                    logging.error(
+                        "Max retries reached. Failed to obtain valid JSON from AI."
+                    )
                     return None
 
         except Exception as e:
@@ -142,6 +152,7 @@ def ask_ai_model(messages, ai_model_url, ai_model_api_key, ai_model_version, ai_
 
     return None  # Return None if all attempts fail.
 
+
 def count_chatgpt_tokens(ai_model_name, prompt):
     """
     Counts the number of tokens in the given prompt using the token encoding for the specified AI model.
@@ -153,7 +164,7 @@ def count_chatgpt_tokens(ai_model_name, prompt):
     Returns:
     int: The number of tokens in the prompt.
     """
-    
+
     try:
         # Try to retrieve the appropriate token encoding based on the AI model name.
         # Different models may use different tokenization methods.
@@ -169,6 +180,7 @@ def count_chatgpt_tokens(ai_model_name, prompt):
     # Return the total number of tokens in the prompt.
     return len(tokens)
 
+
 def replace_code(file_path, start_line, end_line, new_code, object_id):
     """
     Replaces lines of code in a file between specified start and end lines with the provided new code.
@@ -182,10 +194,10 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
     Returns:
     int: updated_lines
     """
-    
+
     try:
         # Open the file in read mode and read all lines into a list.
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             lines = file.readlines()
 
         # Convert any escaped newlines (\\n) in the provided new_code to actual newlines (\n).
@@ -194,15 +206,20 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
         # Replace the lines between start_line and end_line with the new code.
         # We preserve all lines up to start_line-1, insert the new code split into lines,
         # then append all lines after end_line.
-        updated_lines = lines[:start_line-1] + \
-            formatted_code.splitlines(keepends=True) + lines[end_line:]
+        updated_lines = (
+            lines[: start_line - 1]
+            + formatted_code.splitlines(keepends=True)
+            + lines[end_line:]
+        )
 
         # Open the file in write mode and overwrite it with the modified lines.
-        with open(file_path, 'w') as file:
+        with open(file_path, "w") as file:
             file.writelines(updated_lines)
 
         # Print a success message indicating the range of lines that were replaced.
-        print(f"Code between lines {start_line} and {end_line} replaced successfully for the ObjectID - {object_id} inside file -> {file_path}")
+        print(
+            f"Code between lines {start_line} and {end_line} replaced successfully for the ObjectID - {object_id} inside file -> {file_path}"
+        )
 
         return updated_lines
 
@@ -210,41 +227,64 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
         # Catch and print any errors that occur during file handling or code replacement.
         print(f"An error occurred: {e}")
 
-def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, RequestId, IssueID, ObjectID, PromptContent,
-                                ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
-                                ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
-                            ):
-    
-    object_dictionary = { "objectid": ObjectID, "status": "", "message": ""}
-    content_info_dictionary =  { "filefullname": "", "filecontent": ""}
-    
+
+def gen_code_connected_json(
+    ApplicationName,
+    TenantName,
+    RepoURL,
+    RepoName,
+    RequestId,
+    IssueID,
+    ObjectID,
+    PromptContent,
+    ai_model_name,
+    ai_model_version,
+    ai_model_url,
+    ai_model_api_key,
+    ai_model_max_tokens,
+    imaging_url,
+    imaging_api_key,
+    model_invocation_delay,
+    json_resp,
+    fixed_code_directory,
+):
+
+    object_dictionary = {"objectid": ObjectID, "status": "", "message": ""}
+    content_info_dictionary = {"filefullname": "", "filecontent": ""}
+
     # Set the AI model size, defaulting to 4096 if not specified
     ai_model_size = ai_model_max_tokens
 
-    object_id = ObjectID  
-    logging.info("---------------------------------------------------------------------------------------------------------------------------------------")
+    object_id = ObjectID
+    logging.info(
+        "---------------------------------------------------------------------------------------------------------------------------------------"
+    )
     logging.info(f"Processing object_id -> {object_id}.....")
 
     # Initialize DataFrames to store exceptions and impacts
-    exceptions = pd.DataFrame(columns=['link_type', 'exception'])
-    impacts = pd.DataFrame(columns=['object_type', 'object_signature', 'object_link_type', 'object_code'])
+    exceptions = pd.DataFrame(columns=["link_type", "exception"])
+    impacts = pd.DataFrame(
+        columns=["object_type", "object_signature", "object_link_type", "object_code"]
+    )
 
     # Construct URL to fetch object details
     object_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}?select=source-locations"
-    params = {'api-key': imaging_api_key}
+    params = {"api-key": imaging_api_key}
     object_response = requests.get(object_url, params=params)
 
     # Check if object details were fetched successfully
     if object_response.status_code == 200:
         object_data = object_response.json()  # Parse object data
-        object_type = object_data['typeId'] # Get object type
-        object_signature = object_data['mangling']  # Get object signature
-        object_technology = object_data['programmingLanguage']['name']  # Get programming language
-        source_location = object_data['sourceLocations'][0]  # Extract source location
-        object_source_path = source_location['filePath']  # Get source file path
-        object_field_id = source_location['fileId']  # Get file ID
-        object_start_line = source_location['startLine']  # Get start line number
-        object_end_line = source_location['endLine']  # Get end line number
+        object_type = object_data["typeId"]  # Get object type
+        object_signature = object_data["mangling"]  # Get object signature
+        object_technology = object_data["programmingLanguage"][
+            "name"
+        ]  # Get programming language
+        source_location = object_data["sourceLocations"][0]  # Extract source location
+        object_source_path = source_location["filePath"]  # Get source file path
+        object_field_id = source_location["fileId"]  # Get file ID
+        object_start_line = source_location["startLine"]  # Get start line number
+        object_end_line = source_location["endLine"]  # Get end line number
 
         # Construct URL to fetch object code
         object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{object_field_id}?start-line={object_start_line}&end-line={object_end_line}"
@@ -255,7 +295,9 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
             obj_code = object_code_response.text  # Get object code
         else:
             obj_code = ""
-            logging.error(f"Failed to fetch object code using {object_code_url}. Status code: {object_code_response.status_code}")
+            logging.error(
+                f"Failed to fetch object code using {object_code_url}. Status code: {object_code_response.status_code}"
+            )
 
         # Fetch callees for the current object
         object_callees_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}/callees"
@@ -266,15 +308,27 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
             object_exceptions = object_callees_response.json()  # Parse exceptions data
             # Process each exception for the current object
             for object_exception in object_exceptions:
-                link_type = object_exception.get('linkType', '').lower()  # Get link type
-                if link_type in ['raise', 'throw', 'catch']:  # Check for relevant link types
-                    new_row = pd.DataFrame({
-                        'link_type': [object_exception.get('linkType', '')],
-                        'exception': [object_exception.get('name', '')]
-                    })
-                    exceptions = pd.concat([exceptions, new_row], ignore_index=True)  # Append to exceptions DataFrame
+                link_type = object_exception.get(
+                    "linkType", ""
+                ).lower()  # Get link type
+                if link_type in [
+                    "raise",
+                    "throw",
+                    "catch",
+                ]:  # Check for relevant link types
+                    new_row = pd.DataFrame(
+                        {
+                            "link_type": [object_exception.get("linkType", "")],
+                            "exception": [object_exception.get("name", "")],
+                        }
+                    )
+                    exceptions = pd.concat(
+                        [exceptions, new_row], ignore_index=True
+                    )  # Append to exceptions DataFrame
         else:
-            logging.error(f"Failed to fetch callees using {object_callees_url}. Status code: {object_callees_response.status_code}")
+            logging.error(
+                f"Failed to fetch callees using {object_callees_url}. Status code: {object_callees_response.status_code}"
+            )
 
         # Fetch callers for the current object
         object_callers_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}/callers?select=bookmarks"
@@ -285,64 +339,97 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
             impact_objects = object_callers_response.json()  # Parse impact objects data
             # Process each impact object
             for impact_object in impact_objects:
-                impact_object_id = impact_object.get('id')  # Get impact object ID
+                impact_object_id = impact_object.get("id")  # Get impact object ID
                 impact_object_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{impact_object_id}?select=source-locations"
                 impact_object_response = requests.get(impact_object_url, params=params)
 
                 # Check if impact object data was fetched successfully
                 if impact_object_response.status_code == 200:
-                    impact_object_data = impact_object_response.json()  # Parse impact object data
-                    impact_object_type = impact_object_data.get('typeId', '')  # Get impact object type
-                    impact_object_signature = impact_object_data.get('mangling', '')  # Get impact object signature
+                    impact_object_data = (
+                        impact_object_response.json()
+                    )  # Parse impact object data
+                    impact_object_type = impact_object_data.get(
+                        "typeId", ""
+                    )  # Get impact object type
+                    impact_object_signature = impact_object_data.get(
+                        "mangling", ""
+                    )  # Get impact object signature
                 else:
-                    impact_object_type = ''
-                    impact_object_signature = ''
-                    logging.error(f"Failed to fetch impact object data using {impact_object_url}. Status code: {impact_object_response.status_code}")
+                    impact_object_type = ""
+                    impact_object_signature = ""
+                    logging.error(
+                        f"Failed to fetch impact object data using {impact_object_url}. Status code: {impact_object_response.status_code}"
+                    )
 
-                impact_object_link_type = impact_object.get('linkType', '')  # Get link type for impact object
+                impact_object_link_type = impact_object.get(
+                    "linkType", ""
+                )  # Get link type for impact object
 
                 # Handle bookmarks associated with the impact object
-                bookmarks = impact_object.get('bookmarks')
+                bookmarks = impact_object.get("bookmarks")
                 if not bookmarks:
-                    impact_object_code = ''
+                    impact_object_code = ""
                 else:
                     bookmark = bookmarks[0]
-                    impact_object_field_id = bookmark.get('fileId', '')  # Get file ID from bookmark
+                    impact_object_field_id = bookmark.get(
+                        "fileId", ""
+                    )  # Get file ID from bookmark
                     # Calculate start and end lines for impact object code
-                    impact_object_start_line = max(int(bookmark.get('startLine', 1)) - 1, 0)
-                    impact_object_end_line = max(int(bookmark.get('endLine', 1)) - 1, 0)
+                    impact_object_start_line = max(
+                        int(bookmark.get("startLine", 1)) - 1, 0
+                    )
+                    impact_object_end_line = max(int(bookmark.get("endLine", 1)) - 1, 0)
                     # Construct URL to fetch impact object code
                     impact_object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_field_id}?start-line={impact_object_start_line}&end-line={impact_object_end_line}"
-                    impact_object_code_response = requests.get(impact_object_code_url, params=params)
+                    impact_object_code_response = requests.get(
+                        impact_object_code_url, params=params
+                    )
 
                     # Check if the impact object code was fetched successfully
                     if impact_object_code_response.status_code == 200:
-                        impact_object_code = impact_object_code_response.text  # Get impact object code
+                        impact_object_code = (
+                            impact_object_code_response.text
+                        )  # Get impact object code
                     else:
-                        impact_object_code = ''
-                        logging.error(f"Failed to fetch impact object code using {impact_object_code_url}. Status code: {impact_object_code_response.status_code}")
+                        impact_object_code = ""
+                        logging.error(
+                            f"Failed to fetch impact object code using {impact_object_code_url}. Status code: {impact_object_code_response.status_code}"
+                        )
 
                 # Append the impact object data to the impacts DataFrame
-                new_impact_row = pd.DataFrame({
-                    'object_type': [impact_object_type],
-                    'object_signature': [impact_object_signature],
-                    'object_link_type': [impact_object_link_type],
-                    'object_code': [impact_object_code]
-                })
+                new_impact_row = pd.DataFrame(
+                    {
+                        "object_type": [impact_object_type],
+                        "object_signature": [impact_object_signature],
+                        "object_link_type": [impact_object_link_type],
+                        "object_code": [impact_object_code],
+                    }
+                )
                 impacts = pd.concat([impacts, new_impact_row], ignore_index=True)
         else:
-            logging.error(f"Failed to fetch callers using {object_callers_url}. Status code: {object_callers_response.status_code}")
+            logging.error(
+                f"Failed to fetch callers using {object_callers_url}. Status code: {object_callers_response.status_code}"
+            )
     else:
-        logging.error(f"Failed to fetch object data using {object_url}. Status code: {object_response.status_code}") # Skip to the next object if there is an error
+        logging.error(
+            f"Failed to fetch object data using {object_url}. Status code: {object_response.status_code}"
+        )  # Skip to the next object if there is an error
 
     if not exceptions.empty:
         # Group exceptions by link type and aggregate unique exceptions
-        grouped_exceptions = exceptions.groupby('link_type')['exception'].unique()
+        grouped_exceptions = exceptions.groupby("link_type")["exception"].unique()
 
         # Construct exception text
-        exception_text = f"Take into account that {object_type} <{object_signature}>: " + \
-            "; ".join([f"{link_type} {', '.join(exc)}" for link_type, exc in grouped_exceptions.items()])
-        logging.info(f'exception_text = {exception_text}')
+        exception_text = (
+            f"Take into account that {object_type} <{object_signature}>: "
+            + "; ".join(
+                [
+                    f"{link_type} {', '.join(exc)}"
+                    for link_type, exc in grouped_exceptions.items()
+                ]
+            )
+        )
+        logging.info(f"exception_text = {exception_text}")
     else:
         exception_text = ""  # No exceptions found
 
@@ -357,7 +444,7 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
 
     if not impacts.empty:
         impact_text = generate_text(impacts)  # Generate impact analysis text
-        logging.info(f'impact_text = {impact_text}')
+        logging.info(f"impact_text = {impact_text}")
     else:
         impact_text = ""  # No impacts found
 
@@ -370,23 +457,31 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
         f"impacts on code signature, exception management, enclosed objects or other areas in the "
         f"'signature_impact', 'exception_impact', 'enclosed_impact, and 'other_impact' fields respectively, "
         f"with some comments on your prognostics in the 'impact_comment' field.\n"
-        f"\nGUIDELINES:\nUse the following JSON structure to respond:\n'''\n{json_resp}\n'''\n" +
-        (f"\nIMPACT ANALYSIS CONTEXT:\n{impact_text}\n{exception_text}\n" if impact_text or exception_text else "") +
-        "\nMake sure your response is a valid JSON string.\nRespond only the JSON string, and only the JSON string. "
+        f"\nGUIDELINES:\nUse the following JSON structure to respond:\n'''\n{json_resp}\n'''\n"
+        + (
+            f"\nIMPACT ANALYSIS CONTEXT:\n{impact_text}\n{exception_text}\n"
+            if impact_text or exception_text
+            else ""
+        )
+        + "\nMake sure your response is a valid JSON string.\nRespond only the JSON string, and only the JSON string. "
         "Do not enclose the JSON string in triple quotes, backslashes, ... Do not add comments outside of the JSON structure.\n"
     )
 
     # Clean up prompt content for formatting issues
-    prompt_content = prompt_content.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+    prompt_content = (
+        prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+    )
 
     logging.info(f"Prompt Content: {prompt_content}")
 
     # Prepare messages for the AI model
-    messages = [{'role': 'user', 'content': prompt_content}]
+    messages = [{"role": "user", "content": prompt_content}]
 
     # Count tokens for the AI model's input
     code_token = count_chatgpt_tokens(ai_model_name, str(obj_code))
-    prompt_token = count_chatgpt_tokens(ai_model_name, "\n".join([json.dumps(m) for m in messages]))
+    prompt_token = count_chatgpt_tokens(
+        ai_model_name, "\n".join([json.dumps(m) for m in messages])
+    )
 
     # Determine target response size
     target_response_size = int(code_token * 1.2 + 500)
@@ -395,59 +490,80 @@ def gen_code_connected_json(ApplicationName, TenantName, RepoURL, RepoName, Requ
     if prompt_token < (ai_model_size - target_response_size):
         # Ask the AI model for a response
         response_content = ask_ai_model(
-            messages, ai_model_url, ai_model_api_key, ai_model_version, ai_model_name, max_tokens=target_response_size
+            messages,
+            ai_model_url,
+            ai_model_api_key,
+            ai_model_version,
+            ai_model_name,
+            max_tokens=target_response_size,
         )
         logging.info(f"Response Content: {response_content}")
         time.sleep(model_invocation_delay)  # Delay for model invocation
 
         # Check if the response indicates an update was made
-        if response_content['updated'].lower() == 'yes':
+        if response_content["updated"].lower() == "yes":
 
-            comment_str = '//'
-            comment =   f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
+            comment_str = "//"
+            comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
 
-            new_code = response_content['code']  # Extract new code from the response
+            new_code = response_content["code"]  # Extract new code from the response
             # Convert the new_code string back to its readable format
-            readable_code = new_code.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+            readable_code = (
+                new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+            )
             start_line = object_start_line
             end_line = object_end_line
 
-            fixed_code_file = fixed_code_directory + object_source_path.split(RepoName)[-1]
+            fixed_code_file = (
+                fixed_code_directory + object_source_path.split(RepoName)[-1]
+            )
 
             # Replace the old code with the new code in the specified file
-            updated_code = replace_code(fixed_code_file, start_line, end_line, comment + readable_code, object_id)
+            updated_code = replace_code(
+                fixed_code_file,
+                start_line,
+                end_line,
+                comment + readable_code,
+                object_id,
+            )
 
             object_dictionary["status"] = "success"
-            object_dictionary["message"] = response_content['comment']
-            
-            content_info_dictionary["filefullname"] = RepoName + object_source_path.split(RepoName)[-1]
+            object_dictionary["message"] = response_content["comment"]
+
+            content_info_dictionary["filefullname"] = (
+                RepoName + object_source_path.split(RepoName)[-1]
+            )
             content_info_dictionary["filecontent"] = updated_code
 
         else:
             object_dictionary["status"] = "failure"
-            object_dictionary["message"] = response_content['comment']
+            object_dictionary["message"] = response_content["comment"]
 
         # Append the response to the result list
         return object_dictionary, content_info_dictionary
 
     else:
-        logging.warning("Prompt too long; skipping.")  # Warn if the prompt exceeds limits
+        logging.warning(
+            "Prompt too long; skipping."
+        )  # Warn if the prompt exceeds limits
 
         object_dictionary["status"] = "failure"
         object_dictionary["message"] = "failed because of reason: prompt too long"
 
         return object_dictionary, content_info_dictionary
 
-@app.route('/')
+
+@app.route("/")
 def home():
     return "Welcome to CAST AI ENGINE"
 
-@app.route('/ProcessRequest/<string:Request_Id>')
+
+@app.route("/ProcessRequest/<string:Request_Id>")
 def process_request(Request_Id):
 
     model_invocation_delay = 10
 
-    json_resp = '''
+    json_resp = """
     {
     "updated":"<YES/NO to state if you updated the code or not (if you believe it did not need fixing)>",
     "comment":"<explain here what you updated (or the reason why you did not update it)>",
@@ -459,194 +575,206 @@ def process_request(Request_Id):
     "impact_comment":"<comment here on signature, exception, enclosed, other impacts on any other code calling this one (or NA if not applicable)>",
     "code":"<the fixed code goes here (or original code if the code was not updated)>"
     }
-    '''
+    """
 
     # Get Request Information from Mongo DB
-    engine_input = {
-                        "_id": {
-                            "$oid": "66fc114c01b7b08905f87889"
-                        },
-                        "request": [
-                            {
-                            "requestid": "66fc114c01b7b08905f87999",
-                            "issueid": 1200138,
-                            "applicationid": "MER_-_CLNPAR_-_Client_Participation_Survey_Mgmt_System",
-                            "tenantid": "default",
-                            "repourl": "https://github.com/mmctech/mercer-cpsm.git",
-                            "requestdetail": [
-                                {
-                                "promptid": "670504f84594d67cd4750702",
-                                "objectdetails": [
-                                    {
-                                    "objectid": 41140,
-                                    "filefullname": "Mercer.CPSM.Modules.SurveyManagement.ProjectManagement.EditSurvey.BindControls"
-                                    },
-                                    {
-                                    "objectid": 41661,
-                                    "filefullname": "Mercer.CPSM.ListCountry.BindDDLPaging"
-                                    },
-                                    {
-                                    "objectid": 40905,
-                                    "fullfilepath": "Mercer.CPSM.ListSubmissionNotPass2ndIntegrity.BindDDLPaging"
-                                    }
-                                ]
-                                }
-                            ]
-                            }
-                        ],
-                        "createddate": "mmddyy HH:MM:SS"
-                    }
 
-    # SourceCodeLocation = "C:\\ProgramData\\CAST\\AIP-Console-Standalone\\shared\\upload\\Webgoat\\main_sources\\"
+    # Create a MongoClient instance
+    client = MongoClient(mongo_uri)
 
-    # Get the current working directory
-    current_directory = os.getcwd()
+    # Example of accessing a specific database (replace 'mydatabase' with your DB name)
+    db = client["ApplicationHDev"]
 
-    # # Get the current datetime stamp for directory and file naming
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # Example of accessing a collection (replace 'mycollection' with your collection name)
+    engine_input_collection = db["EngineInput"]
+    prompt_library_collection = db["PromptLibrary"]
+    engine_output_collection = db["EngineOutput"]
 
-    # result = []  # Initialize result list to hold processed data
+    # Optionally, print some documents from the collection (this assumes the collection exists)
+    engine_input_documents = engine_input_collection.find()
+    for engine_input_doc in engine_input_documents:
 
-    for request in engine_input['request']:
+        # SourceCodeLocation = "C:\\ProgramData\\CAST\\AIP-Console-Standalone\\shared\\upload\\Webgoat\\main_sources\\"
 
-        if request['requestid'] == Request_Id:
+        # Get the current working directory
+        current_directory = os.getcwd()
 
-            ApplicationName = request['applicationid']
-            TenantName = request['tenantid']
-            RepoURL = request['repourl']
-            RepoName = RepoURL.split('/')[-1].replace('.git', '')
-            RequestId = request['requestid']
-            IssueID = request['issueid']
+        # # Get the current datetime stamp for directory and file naming
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-            # Define the output directory name based on the input parameters and timestamp
-            # output_directory = f"{ApplicationName}"
-            output_directory = os.path.abspath(f'output//{ApplicationName}')
+        # result = []  # Initialize result list to hold processed data
 
-            # Create the output directory; if it already exists, do nothing
-            os.makedirs(output_directory, exist_ok=True)
-            print(f"Directory '{output_directory}' created successfully!")
+        for request in engine_input_doc["request"]:
+            if request["requestid"] == Request_Id:
 
-            engine_output = {
-                                "requestid": RequestId,
-                                "issueid": IssueID,
-                                "objects": [],
-                                "contentinfo": [],
-                                "status": "",
-                                "createddate": timestamp
-                            }
-            
-            objects_status_list = []
+                ApplicationName = request["applicationid"]
+                TenantName = request["tenantid"]
+                RepoURL = request["repourl"]
+                RepoName = RepoURL.split("/")[-1].replace(".git", "")
+                RequestId = request["requestid"]
+                IssueID = request["issueid"]
 
-            # Define the directory for storing fixed source code
-            fixed_code_directory = os.path.join(
-                output_directory,
-                f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
-                f"{RepoName}"
-            )
+                # Define the output directory name based on the input parameters and timestamp
+                # output_directory = f"{ApplicationName}"
+                output_directory = os.path.abspath(f"output//{ApplicationName}")
 
-            os.makedirs(fixed_code_directory, exist_ok=True)  # Create the directory for fixed source code
-            print(f"Directory '{fixed_code_directory}' created successfully!")
+                # Create the output directory; if it already exists, do nothing
+                os.makedirs(output_directory, exist_ok=True)
+                print(f"Directory '{output_directory}' created successfully!")
 
-            repo_url_without_protocol = RepoURL.replace("https://", "")
-        
-            # Construct the authenticated repo URL
-            auth_repo_url = f"https://{github_token}@{repo_url_without_protocol}"
+                engine_output = {
+                    "requestid": RequestId,
+                    "issueid": IssueID,
+                    "objects": [],
+                    "contentinfo": [],
+                    "status": "",
+                    "createddate": timestamp,
+                }
 
-            try:
-                print(f"Cloning into {fixed_code_directory}...")
-                subprocess.run(["git", "clone", auth_repo_url, fixed_code_directory], check=True)
-                print("Repository cloned successfully.")
-            except Exception as e:
-                print(f"Error during cloning: {e}")
+                objects_status_list = []
 
-            # Create a log filename based on the input parameters and timestamp
-            filename = f'Logs_for_IssueID_{IssueID}_timestamp_{timestamp}.txt'
+                # Define the directory for storing fixed source code
+                fixed_code_directory = os.path.join(
+                    output_directory,
+                    f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
+                    f"{RepoName}",
+                )
 
-            # Configure logging to write logs to the specified log file
-            logging.basicConfig(
-                filename=os.path.join(current_directory, output_directory, filename),
-                level=logging.INFO,
-                format="%(asctime)s %(levelname)s: %(message)s",
-                filemode='w'  # Overwrite log file each time the script runs
-            )
+                os.makedirs(
+                    fixed_code_directory, exist_ok=True
+                )  # Create the directory for fixed source code
+                print(f"Directory '{fixed_code_directory}' created successfully!")
 
-            for requestdetail in request['requestdetail']:
-                prompt_id = requestdetail['promptid']
-                #fetch based on IssueID
-                prompt_library = {
-                                    "_id": {
-                                        "$oid": "670504114594d67cd4750700"
-                                    },
-                                    "applicationid": None,
-                                    "issueid": 1200138,
-                                    "issuename": "Green - Avoid instantiations inside loops",
-                                    "prompttype": "generic",
-                                    "technologies": [
-                                        {
-                                        "technology": "c#",
-                                        "prompts": [
-                                            {
-                                            "promptid": "670504f84594d67cd4750702",
-                                            "prompt": "Please refactor the code (written in C# language) to address the code review issue: Avoid instantiations inside loops. The intent is to initiate the variables outside the for loop.\n\nHere is a sample code that is following this practice\n\n\nint rateSetId = 0;\nstring planName= String.Empty;\nvar planDesign = null;\nfor (int i = 0; i < plans.Count; i++)\n{\n\trateSetId = plans.ElementAt(i).RateSetID;\n\tplanName = plans.ElementAt(i).RenewalsPlanName.Replace(\" -\", \"-\").Replace(\"- \", \"-\");\n\tplanDesign = new LookupManager().GetPlanDesign(planPeriodId, rateSetId, deliverableId);\n}"
-                                            }
-                                        ]
-                                        },
-                                        {
-                                        "technology": "javascript",
-                                        "prompts": [
-                                            {
-                                            "promptid": "670504114594d67cd4750708",
-                                            "prompt": "\"Act as a skilled software developer and programmer.\nIn the provided code, refactor the code to fix the following code review issue.\n\nCode Review Issue: Avoid instantiations inside loops\n\nEnsure to enhance performance and maintainability. Please fix the provided code and not the example code in the prompt. Use the example code as reference to fix the actual code\""
-                                            }
-                                        ]
-                                        }
-                                    ],
-                                    "type": "Green Deficiency",
-                                    "enabled": True
-                                }
-                for technology in prompt_library['technologies']:
-                    for prompt in technology['prompts']:
-                        if prompt_id == prompt['promptid']:
-                            PromptContent = prompt['prompt']
-                            for objectdetail in requestdetail['objectdetails']:
-                                ObjectID = objectdetail['objectid']
+                repo_url_without_protocol = RepoURL.replace("https://", "")
 
-                                # Call the gen_code_connected_json function to process the request and generate code updates
-                                object_data, contentinfo_data = gen_code_connected_json(
-                                    ApplicationName, TenantName, RepoURL, RepoName, RequestId, IssueID, ObjectID, PromptContent,
-                                    ai_model_name, ai_model_version, ai_model_url, ai_model_api_key,
-                                    ai_model_max_tokens, imaging_url, imaging_api_key, model_invocation_delay, json_resp, fixed_code_directory
-                                )
+                # Construct the authenticated repo URL
+                auth_repo_url = f"https://{github_token}@{repo_url_without_protocol}"
 
-                                engine_output['objects'].append(object_data)
+                try:
+                    print(f"Cloning into {fixed_code_directory}...")
+                    subprocess.run(
+                        ["git", "clone", auth_repo_url, fixed_code_directory],
+                        check=True,
+                    )
+                    print("Repository cloned successfully.")
+                except Exception as e:
+                    print(f"Error during cloning: {e}")
 
-                                objects_status_list.append(object_data['status'])
+                # Create a log filename based on the input parameters and timestamp
+                filename = f"Logs_for_IssueID_{IssueID}_timestamp_{timestamp}.txt"
 
-                                if contentinfo_data["filefullname"] or contentinfo_data["filecontent"]:
-                                    engine_output['contentinfo'].append(contentinfo_data)
+                # Configure logging to write logs to the specified log file
+                logging.basicConfig(
+                    filename=os.path.join(
+                        current_directory, output_directory, filename
+                    ),
+                    level=logging.INFO,
+                    format="%(asctime)s %(levelname)s: %(message)s",
+                    filemode="w",  # Overwrite log file each time the script runs
+                )
 
-            # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
-            filename = output_directory + \
-                f'/AI_Response_for_IssueID-{IssueID}_timestamp_{timestamp}.json'
-            
-            if all(item == 'success' for item in objects_status_list):
-                engine_output['status'] = 'success'
-            elif all(item == 'failure' for item in objects_status_list):
-                engine_output['status'] = 'failure'
-            else:
-                engine_output['status'] = 'partial success'
+                for requestdetail in request["requestdetail"]:
+                    prompt_id = requestdetail["promptid"]
 
-            # Write the JSON response data to the specified file with pretty formatting
-            with open(filename, 'w') as json_file:
-                json.dump(engine_output, json_file, indent=4)  # Save data as formatted JSON in the file
+                    prompt_library_documents = prompt_library_collection.find()
 
-            try:
-                shutil.rmtree(fixed_code_directory)
-                print(f"{fixed_code_directory} has been deleted.")
-            except OSError as e:
-                print(f"Error: {e.strerror}")
+                    for prompt_library_doc in prompt_library_documents:
 
-            return jsonify(engine_output), 200  # Return JSON response with HTTP status code
+                        for technology in prompt_library_doc["technologies"]:
+                            for prompt in technology["prompts"]:
+                                if prompt_id == prompt["promptid"]:
+                                    PromptContent = prompt["prompt"]
+                                    for objectdetail in requestdetail["objectdetails"]:
+                                        ObjectID = objectdetail["objectid"]
 
-if __name__ == '__main__':
+                                        # Call the gen_code_connected_json function to process the request and generate code updates
+                                        object_data, contentinfo_data = (
+                                            gen_code_connected_json(
+                                                ApplicationName,
+                                                TenantName,
+                                                RepoURL,
+                                                RepoName,
+                                                RequestId,
+                                                IssueID,
+                                                ObjectID,
+                                                PromptContent,
+                                                ai_model_name,
+                                                ai_model_version,
+                                                ai_model_url,
+                                                ai_model_api_key,
+                                                ai_model_max_tokens,
+                                                imaging_url,
+                                                imaging_api_key,
+                                                model_invocation_delay,
+                                                json_resp,
+                                                fixed_code_directory,
+                                            )
+                                        )
+
+                                        engine_output["objects"].append(object_data)
+
+                                        objects_status_list.append(
+                                            object_data["status"]
+                                        )
+
+                                        if (
+                                            contentinfo_data["filefullname"]
+                                            or contentinfo_data["filecontent"]
+                                        ):
+                                            engine_output["contentinfo"].append(
+                                                contentinfo_data
+                                            )
+
+                    # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
+                    filename = (
+                        output_directory
+                        + f"/AI_Response_for_IssueID-{IssueID}_timestamp_{timestamp}.json"
+                    )
+
+                    if all(item == "success" for item in objects_status_list):
+                        engine_output["status"] = "success"
+                    elif all(item == "failure" for item in objects_status_list):
+                        engine_output["status"] = "failure"
+                    else:
+                        engine_output["status"] = "partial success"
+
+                    # Write the JSON response data to the specified file with pretty formatting
+                    with open(filename, "w") as json_file:
+                        json.dump(
+                            engine_output, json_file, indent=4
+                        )  # Save data as formatted JSON in the file
+
+                    # Check if data already exists
+                    existing_record = engine_output_collection.find_one(
+                        {"requestid": engine_output["requestid"]}
+                    )
+
+                    if existing_record:
+                        # Delete the existing record
+                        engine_output_collection.delete_one(
+                            {"requestid": engine_output["requestid"]}
+                        )
+                        print(
+                            f"Existing requestid - {engine_output['requestid']} deleted."
+                        )
+
+                    # Insert the new data
+                    result = engine_output_collection.insert_one(engine_output)
+                    print(f"Data inserted for requestid - {engine_output['requestid']}")
+
+                    # try:
+                    #     dir_to_delete = fixed_code_directory.replace(RepoName, "")
+                    #     shutil.rmtree(dir_to_delete)
+                    #     print(f"{dir_to_delete} has been deleted.")
+                    # except Exception as e:
+                    #     print(f"error deleting {dir_to_delete}:- {e}")
+
+                return (
+                    # jsonify(engine_output),
+                    "success",
+                    200,
+                )  # Return JSON response with HTTP status code
+
+
+if __name__ == "__main__":
     app.run(debug=True, port=5001)
