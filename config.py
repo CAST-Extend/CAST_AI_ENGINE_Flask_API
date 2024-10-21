@@ -11,6 +11,7 @@ class Config:
 
     GITHUB_TOKEN = ''
 
+    MONGODB_CONNECTION_STRING = ''
 
     
 
