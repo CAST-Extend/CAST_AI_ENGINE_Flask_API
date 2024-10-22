@@ -1,3 +1,4 @@
+import stat
 import subprocess
 from flask import Flask, jsonify
 from config import Config
@@ -762,12 +763,19 @@ def process_request(Request_Id):
                     result = engine_output_collection.insert_one(engine_output)
                     print(f"Data inserted for requestid - {engine_output['requestid']}")
 
-                    # try:
-                    #     dir_to_delete = fixed_code_directory.replace(RepoName, "")
-                    #     shutil.rmtree(dir_to_delete)
-                    #     print(f"{dir_to_delete} has been deleted.")
-                    # except Exception as e:
-                    #     print(f"error deleting {dir_to_delete}:- {e}")
+                    def on_rm_error(func, path, exc_info):
+                        # Change the file or directory's permissions, then call the function again
+                        os.chmod(path, stat.S_IWRITE)  # Set write permission
+                        func(path)  # Retry the removal
+
+                    dir_path = fixed_code_directory.replace(RepoName, "")
+                    try:
+                        shutil.rmtree(
+                            dir_path, onerror=on_rm_error
+                        )  # Use onerror to handle access denied
+                        print(f"{dir_path} has been deleted permanently.")
+                    except Exception as e:
+                        print(f"Error: {e}")
 
                 return (
                     # jsonify(engine_output),
