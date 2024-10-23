@@ -15,6 +15,7 @@ from openai import AzureOpenAI
 from datetime import datetime
 import warnings
 from pymongo import MongoClient
+
 from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError
 
 
@@ -229,6 +230,138 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
         print(f"An error occurred: {e}")
 
 
+def check_dependent_code_json(
+    dep_object_type,
+    dep_object_signature,
+    dep_obj_code,
+    parent_info,
+    model_invocation_delay,
+    dep_object_start_line,
+    dep_object_end_line,
+    dep_object_id,
+    object_source_path,
+    fixed_code_directory,
+    RepoName,
+):
+
+    object_dictionary = {"objectid": dep_object_id, "status": "", "message": ""}
+    content_info_dictionary = {"filefullname": "", "filecontent": ""}
+
+    json_dep_resp = """
+    {
+    "updated":"<YES/NO to state if you updated the dependent code or not (if you believe it did not need updating)>",
+    "comment":"<explain here what you updated (or NA if the dependent code does not need to be updated)>",
+    "missing_information":"<list here information needed to finalize the dependent code (or NA if nothing is needed or if the dependent code was not updated)>",
+    "signature_impact":"<YES/NO/UNKNOWN, to state here if the signature of the dependent code will be updated as a consequence of changed parameter list, types, return type, etc.>",
+    "exception_impact":"<YES/NO/UNKNOWN, to state here if the exception handling related to the dependent code will be update, as a consequence of changed exception thrown or caugth, etc.>",
+    "enclosed_impact":"<YES/NO/UNKNOWN, to state here if the dependent code update could impact further code enclosed in it in the same source file, such as methods defined in updated class, etc.>",
+    "other_impact":"<YES/NO/UNKNOWN, to state here if the dependent code update could impact any other code referencing this code>",
+    "impact_comment":"<comment here on signature, exception, enclosed, other impacts on any other code calling this one (or NA if not applicable)>",
+    "code":"<the updated dependent code goes here (or original dependent code if the dependent code was not updated)>"
+    }"""
+
+    # Construct the prompt for the AI model
+    prompt_content = f"""
+                    CONTEXT: {dep_object_type} <{dep_object_signature}> is dependent on code that was modified by an AI:
+                    {parent_info if parent_info else ''}
+                    TASK:
+                    Check and update if needed the following code:
+                    '''\n{dep_obj_code}\n'''
+                    GUIDELINES:
+                    Use the following JSON structure to respond:
+                    '''\n{json_dep_resp}\n'''
+                    Make sure your response is a valid JSON string.
+                    Respond only with the JSON string.
+                    """
+
+    # Clean up prompt content for formatting issues
+    prompt_content = (
+        prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+    )
+
+    logging.info(f"Prompt Content: {prompt_content}")
+
+    # Prepare messages for the AI model
+    messages = [{"role": "user", "content": prompt_content}]
+
+    # Count tokens for the AI model's input
+    code_token = count_chatgpt_tokens(ai_model_name, str(dep_obj_code))
+    prompt_token = count_chatgpt_tokens(
+        ai_model_name, "\n".join([json.dumps(m) for m in messages])
+    )
+
+    # Determine target response size
+    target_response_size = int(code_token * 1.2 + 500)
+
+    result = []
+
+    # Check if the prompt length is within acceptable limits
+    if prompt_token < (ai_model_max_tokens - target_response_size):
+        # Ask the AI model for a response
+        response_content = ask_ai_model(
+            messages,
+            ai_model_url,
+            ai_model_api_key,
+            ai_model_version,
+            ai_model_name,
+            max_tokens=target_response_size,
+        )
+        logging.info(f"Response Content: {response_content}")
+        time.sleep(model_invocation_delay)  # Delay for model invocation
+
+        # Check if the response indicates an update was made
+        if response_content["updated"].lower() == "yes":
+
+            comment_str = "//"
+            comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
+
+            new_code = response_content["code"]  # Extract new code from the response
+            # Convert the new_code string back to its readable format
+            readable_code = (
+                new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+            )
+            start_line = int(dep_object_start_line)
+            end_line = int(dep_object_end_line)
+
+            fixed_code_file = (
+                fixed_code_directory + object_source_path.split(RepoName)[-1]
+            )
+
+            # Replace the old code with the new code in the specified file
+            updated_code = replace_code(
+                fixed_code_file,
+                start_line,
+                end_line,
+                comment + readable_code,
+                dep_object_id,
+            )
+
+            object_dictionary["status"] = "success"
+            object_dictionary["message"] = response_content["comment"]
+
+            content_info_dictionary["filefullname"] = (
+                RepoName + object_source_path.split(RepoName)[-1]
+            )
+            content_info_dictionary["filecontent"] = updated_code
+
+        else:
+            object_dictionary["status"] = "failure"
+            object_dictionary["message"] = response_content["comment"]
+
+        # Append the response to the result list
+        return object_dictionary, content_info_dictionary
+
+    else:
+        logging.warning(
+            "Prompt too long; skipping."
+        )  # Warn if the prompt exceeds limits
+
+        object_dictionary["status"] = "failure"
+        object_dictionary["message"] = "failed because of reason: prompt too long"
+
+        return object_dictionary, content_info_dictionary
+
+
 def gen_code_connected_json(
     ApplicationName,
     TenantName,
@@ -248,13 +381,11 @@ def gen_code_connected_json(
     model_invocation_delay,
     json_resp,
     fixed_code_directory,
+    engine_output,
 ):
 
     object_dictionary = {"objectid": ObjectID, "status": "", "message": ""}
     content_info_dictionary = {"filefullname": "", "filecontent": ""}
-
-    # Set the AI model size, defaulting to 4096 if not specified
-    ai_model_size = ai_model_max_tokens
 
     object_id = ObjectID
     logging.info(
@@ -355,6 +486,38 @@ def gen_code_connected_json(
                     impact_object_signature = impact_object_data.get(
                         "mangling", ""
                     )  # Get impact object signature
+                    impact_object_source_location = object_data["sourceLocations"][
+                        0
+                    ]  # Extract source location
+                    impact_object_source_path = impact_object_source_location[
+                        "filePath"
+                    ]  # Get source file path
+                    impact_object_field_id = impact_object_source_location[
+                        "fileId"
+                    ]  # Get file ID
+                    impact_object_start_line = impact_object_source_location[
+                        "startLine"
+                    ]  # Get start line number
+                    impact_object_end_line = impact_object_source_location[
+                        "endLine"
+                    ]  # Get end line number
+
+                    impact_object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_field_id}?start-line={impact_object_start_line}&end-line={impact_object_end_line}"
+                    impact_object_code_response = requests.get(
+                        impact_object_code_url, params=params
+                    )
+
+                    # Check if the object code was fetched successfully
+                    if impact_object_code_response.status_code == 200:
+                        impact_object_full_code = (
+                            impact_object_code_response.text
+                        )  # Get object code
+                    else:
+                        impact_object_full_code = ""
+                        logging.error(
+                            f"Failed to fetch object code using {object_code_url}. Status code: {object_code_response.status_code}"
+                        )
+
                 else:
                     impact_object_type = ""
                     impact_object_signature = ""
@@ -400,10 +563,15 @@ def gen_code_connected_json(
                 # Append the impact object data to the impacts DataFrame
                 new_impact_row = pd.DataFrame(
                     {
+                        "object_id": [impact_object_id],
                         "object_type": [impact_object_type],
                         "object_signature": [impact_object_signature],
                         "object_link_type": [impact_object_link_type],
                         "object_code": [impact_object_code],
+                        "object_source_path": [impact_object_source_path],
+                        "object_start_line": [impact_object_start_line],
+                        "object_end_line": [impact_object_end_line],
+                        "object_full_code": [impact_object_full_code],
                     }
                 )
                 impacts = pd.concat([impacts, new_impact_row], ignore_index=True)
@@ -487,8 +655,10 @@ def gen_code_connected_json(
     # Determine target response size
     target_response_size = int(code_token * 1.2 + 500)
 
+    result = []
+
     # Check if the prompt length is within acceptable limits
-    if prompt_token < (ai_model_size - target_response_size):
+    if prompt_token < (ai_model_max_tokens - target_response_size):
         # Ask the AI model for a response
         response_content = ask_ai_model(
             messages,
@@ -536,12 +706,52 @@ def gen_code_connected_json(
             )
             content_info_dictionary["filecontent"] = updated_code
 
+            if (
+                response_content["signature_impact"].upper() == "NO"
+                or response_content["exception_impact"].upper() == "YES"
+                or response_content["enclosed_impact"].upper() == "YES"
+                or response_content["other_impact"].upper() == "YES"
+            ):
+                if not impacts.empty:
+                    for i, row in impacts.iterrows():
+                        parent_info = f"""The {row['object_type']} <{row['object_signature']}> source code is the following:
+                                        ```
+                                        {row['object_code']}
+                                        ```
+                                        This source code is defined in the {object_type} <{fixed_code_file}>.
+                                        The {object_type} <{fixed_code_file}> was updated by an AI the following way: [{response_content['comment']}].
+                                        The AI predicted the following impacts on related code:
+                                        * on signature: {response_content['signature_impact']}
+                                        * on exceptions: {response_content['exception_impact']}
+                                        * on enclosed objects: {response_content['enclosed_impact']}
+                                        * other: {response_content['other_impact']}
+                                        for the following reason: [{response_content['comment'] if response_content['impact_comment'] == 'NA' else response_content['impact_comment']}]."""
+
+                        object_data, contentinfo_data = check_dependent_code_json(
+                            row["object_type"],
+                            row["object_signature"],
+                            row["object_full_code"],
+                            parent_info,
+                            model_invocation_delay,
+                            row["object_start_line"],
+                            row["object_end_line"],
+                            row["object_id"],
+                            row["object_source_path"],
+                            fixed_code_directory,
+                            RepoName,
+                        )
+
+                        engine_output["objects"].append(object_data)
+
+                        if (
+                            contentinfo_data["filefullname"]
+                            or contentinfo_data["filecontent"]
+                        ):
+                            engine_output["contentinfo"].append(contentinfo_data)
+
         else:
             object_dictionary["status"] = "failure"
             object_dictionary["message"] = response_content["comment"]
-
-        # Append the response to the result list
-        return object_dictionary, content_info_dictionary
 
     else:
         logging.warning(
@@ -551,7 +761,15 @@ def gen_code_connected_json(
         object_dictionary["status"] = "failure"
         object_dictionary["message"] = "failed because of reason: prompt too long"
 
-        return object_dictionary, content_info_dictionary
+    engine_output["objects"].append(object_dictionary)
+
+    if (
+        content_info_dictionary["filefullname"]
+        or content_info_dictionary["filecontent"]
+    ):
+        engine_output["contentinfo"].append(content_info_dictionary)
+
+    return engine_output
 
 
 @app.route("/")
@@ -677,7 +895,9 @@ def process_request(Request_Id):
                 for requestdetail in request["requestdetail"]:
                     prompt_id = requestdetail["promptid"]
 
-                    prompt_library_documents = prompt_library_collection.find()
+                    prompt_library_documents = prompt_library_collection.find(
+                        {"issueid": IssueID}
+                    )
 
                     for prompt_library_doc in prompt_library_documents:
 
@@ -689,48 +909,40 @@ def process_request(Request_Id):
                                         ObjectID = objectdetail["objectid"]
 
                                         # Call the gen_code_connected_json function to process the request and generate code updates
-                                        object_data, contentinfo_data = (
-                                            gen_code_connected_json(
-                                                ApplicationName,
-                                                TenantName,
-                                                RepoURL,
-                                                RepoName,
-                                                RequestId,
-                                                IssueID,
-                                                ObjectID,
-                                                PromptContent,
-                                                ai_model_name,
-                                                ai_model_version,
-                                                ai_model_url,
-                                                ai_model_api_key,
-                                                ai_model_max_tokens,
-                                                imaging_url,
-                                                imaging_api_key,
-                                                model_invocation_delay,
-                                                json_resp,
-                                                fixed_code_directory,
-                                            )
+                                        engine_output = gen_code_connected_json(
+                                            ApplicationName,
+                                            TenantName,
+                                            RepoURL,
+                                            RepoName,
+                                            RequestId,
+                                            IssueID,
+                                            ObjectID,
+                                            PromptContent,
+                                            ai_model_name,
+                                            ai_model_version,
+                                            ai_model_url,
+                                            ai_model_api_key,
+                                            ai_model_max_tokens,
+                                            imaging_url,
+                                            imaging_api_key,
+                                            model_invocation_delay,
+                                            json_resp,
+                                            fixed_code_directory,
+                                            engine_output,
                                         )
 
-                                        engine_output["objects"].append(object_data)
-
-                                        objects_status_list.append(
-                                            object_data["status"]
-                                        )
-
-                                        if (
-                                            contentinfo_data["filefullname"]
-                                            or contentinfo_data["filecontent"]
-                                        ):
-                                            engine_output["contentinfo"].append(
-                                                contentinfo_data
-                                            )
+                                        # objects_status_list.append(
+                                        #     object_data["status"]
+                                        # )
 
                     # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
                     filename = (
                         output_directory
                         + f"/AI_Response_for_IssueID-{IssueID}_timestamp_{timestamp}.json"
                     )
+
+                    for object in engine_output['objects']:
+                        objects_status_list.append(object['status'])
 
                     if all(item == "success" for item in objects_status_list):
                         engine_output["status"] = "success"
@@ -778,10 +990,9 @@ def process_request(Request_Id):
                         print(f"Error: {e}")
 
                 return (
-                    # jsonify(engine_output),
                     "success",
                     200,
-                )  # Return JSON response with HTTP status code
+                )
 
 
 if __name__ == "__main__":
