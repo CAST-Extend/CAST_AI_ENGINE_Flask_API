@@ -707,7 +707,7 @@ def gen_code_connected_json(
             content_info_dictionary["filecontent"] = updated_code
 
             if (
-                response_content["signature_impact"].upper() == "NO"
+                response_content["signature_impact"].upper() == "YES"
                 or response_content["exception_impact"].upper() == "YES"
                 or response_content["enclosed_impact"].upper() == "YES"
                 or response_content["other_impact"].upper() == "YES"
