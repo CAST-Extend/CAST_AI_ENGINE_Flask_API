@@ -74,7 +74,8 @@ RETRY_DELAY = 2  # Delay in seconds between retries
 
 
 def ask_ai_model(
-    messages,
+    prompt_content,
+    json_resp,
     ai_model_url,
     ai_model_api_key,
     ai_model_version,
@@ -86,7 +87,7 @@ def ask_ai_model(
     Retries the request if an invalid JSON is received.
 
     Parameters:
-    messages (list): A list of messages (prompts) to send to the AI model.
+    prompt_content (str): prompt to send to the AI model.
     ai_model_url (str): The URL of the AI model endpoint.
     ai_model_api_key (str): The API key for authenticating with the AI model.
     ai_model_version (str): The version of the AI model being used.
@@ -96,6 +97,8 @@ def ask_ai_model(
     Returns:
     dict or None: The JSON response from the AI model if valid, otherwise None.
     """
+
+    messages = [{"role": "user", "content": prompt_content}]
 
     # Prepare the payload for the AI API
     payload = {"model": ai_model_name, "messages": messages, "temperature": 0}
@@ -134,6 +137,18 @@ def ask_ai_model(
                     # If attempts remain, wait for a delay before retrying.
                     logging.info(f"Retrying AI request in {RETRY_DELAY} seconds...")
                     time.sleep(RETRY_DELAY)
+
+                    prompt_content = (
+                        f"The following text is not a valid JSON string:\n```\n{response_content}\n```\n"
+                        f"When trying to parse it with json.loads() in Python script, one gets the following error:\n```\n{e}\n```\n"
+                        f"It should match the following structure:\n```\n{json_resp}\n```\n"
+                        "Make sure your response is a valid JSON string. Respond only with the JSON string."
+                    )
+
+                    messages = [{"role": "user", "content": prompt_content}]
+                    # Prepare the payload for the AI API
+                    payload = {"model": ai_model_name, "messages": messages, "temperature": 0}
+
                 else:
                     # If max retries reached, log an error and return None.
                     logging.error(
@@ -147,6 +162,18 @@ def ask_ai_model(
             if attempt < MAX_RETRIES:
                 logging.info(f"Retrying AI request in {RETRY_DELAY} seconds...")
                 time.sleep(RETRY_DELAY)
+
+                prompt_content = (
+                    f"The following text is not a valid JSON string:\n```\n{response_content}\n```\n"
+                    f"When trying to parse it with json.loads() in Python script, one gets the following error:\n```\n{e}\n```\n"
+                    f"It should match the following structure:\n```\n{json_resp}\n```\n"
+                    "Make sure your response is a valid JSON string. Respond only with the JSON string."
+                )
+
+                messages = [{"role": "user", "content": prompt_content}]
+                # Prepare the payload for the AI API
+                payload = {"model": ai_model_name, "messages": messages, "temperature": 0}
+
             else:
                 # If max retries reached due to persistent errors, log and return None.
                 logging.error("Max retries reached due to persistent errors.")
@@ -183,7 +210,7 @@ def count_chatgpt_tokens(ai_model_name, prompt):
     return len(tokens)
 
 
-def replace_code(file_path, start_line, end_line, new_code, object_id):
+def replace_code(file_content, start_line, end_line, new_code, object_id, file_path):
     """
     Replaces lines of code in a file between specified start and end lines with the provided new code.
 
@@ -198,9 +225,8 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
     """
 
     try:
-        # Open the file in read mode and read all lines into a list.
-        with open(file_path, "r") as file:
-            lines = file.readlines()
+
+        lines = file_content
 
         # Convert any escaped newlines (\\n) in the provided new_code to actual newlines (\n).
         formatted_code = new_code.replace(r"\\n", "\n")
@@ -213,10 +239,6 @@ def replace_code(file_path, start_line, end_line, new_code, object_id):
             + formatted_code.splitlines(keepends=True)
             + lines[end_line:]
         )
-
-        # Open the file in write mode and overwrite it with the modified lines.
-        with open(file_path, "w") as file:
-            file.writelines(updated_lines)
 
         # Print a success message indicating the range of lines that were replaced.
         print(
@@ -240,8 +262,9 @@ def check_dependent_code_json(
     dep_object_end_line,
     dep_object_id,
     object_source_path,
-    fixed_code_directory,
     RepoName,
+    dep_object_file_content,
+    dep_object_file_path
 ):
 
     object_dictionary = {"objectid": dep_object_id, "status": "", "message": ""}
@@ -299,7 +322,8 @@ def check_dependent_code_json(
     if prompt_token < (ai_model_max_tokens - target_response_size):
         # Ask the AI model for a response
         response_content = ask_ai_model(
-            messages,
+            prompt_content,
+            json_dep_resp,
             ai_model_url,
             ai_model_api_key,
             ai_model_version,
@@ -323,17 +347,14 @@ def check_dependent_code_json(
             start_line = int(dep_object_start_line)
             end_line = int(dep_object_end_line)
 
-            fixed_code_file = (
-                fixed_code_directory + object_source_path.split(RepoName)[-1]
-            )
-
             # Replace the old code with the new code in the specified file
             updated_code = replace_code(
-                fixed_code_file,
+                dep_object_file_content,
                 start_line,
                 end_line,
                 comment + readable_code,
                 dep_object_id,
+                dep_object_file_path
             )
 
             object_dictionary["status"] = "success"
@@ -365,7 +386,6 @@ def check_dependent_code_json(
 def gen_code_connected_json(
     ApplicationName,
     TenantName,
-    RepoURL,
     RepoName,
     RequestId,
     IssueID,
@@ -380,7 +400,6 @@ def gen_code_connected_json(
     imaging_api_key,
     model_invocation_delay,
     json_resp,
-    fixed_code_directory,
     engine_output,
 ):
 
@@ -569,6 +588,7 @@ def gen_code_connected_json(
                         "object_link_type": [impact_object_link_type],
                         "object_code": [impact_object_code],
                         "object_source_path": [impact_object_source_path],
+                        "object_file_id":[impact_object_field_id],
                         "object_start_line": [impact_object_start_line],
                         "object_end_line": [impact_object_end_line],
                         "object_full_code": [impact_object_full_code],
@@ -661,7 +681,8 @@ def gen_code_connected_json(
     if prompt_token < (ai_model_max_tokens - target_response_size):
         # Ask the AI model for a response
         response_content = ask_ai_model(
-            messages,
+            prompt_content,
+            json_resp,
             ai_model_url,
             ai_model_api_key,
             ai_model_version,
@@ -685,17 +706,30 @@ def gen_code_connected_json(
             start_line = object_start_line
             end_line = object_end_line
 
-            fixed_code_file = (
-                fixed_code_directory + object_source_path.split(RepoName)[-1]
-            )
+            # Construct URL to fetch object code
+            file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{object_field_id}"
+            file_content_response = requests.get(file_content_url, params=params)
+
+            # Check if the object code was fetched successfully
+            if file_content_response.status_code == 200:
+                file_content = file_content_response.text  # Get object code
+            else:
+                file_content = ""
+                logging.error(
+                    f"Failed to fetch object code using {object_code_url}. Status code: {file_content_response.status_code}"
+                )            
+
+            file_content = file_content.splitlines(keepends=True)
+            file_path = RepoName + object_source_path.split(RepoName)[-1]
 
             # Replace the old code with the new code in the specified file
             updated_code = replace_code(
-                fixed_code_file,
+                file_content,
                 start_line,
                 end_line,
                 comment + readable_code,
                 object_id,
+                file_path
             )
 
             object_dictionary["status"] = "success"
@@ -718,14 +752,30 @@ def gen_code_connected_json(
                                         ```
                                         {row['object_code']}
                                         ```
-                                        This source code is defined in the {object_type} <{fixed_code_file}>.
-                                        The {object_type} <{fixed_code_file}> was updated by an AI the following way: [{response_content['comment']}].
+                                        This source code is defined in the {object_type} <{file_path}>.
+                                        The {object_type} <{file_path}> was updated by an AI the following way: [{response_content['comment']}].
                                         The AI predicted the following impacts on related code:
                                         * on signature: {response_content['signature_impact']}
                                         * on exceptions: {response_content['exception_impact']}
                                         * on enclosed objects: {response_content['enclosed_impact']}
                                         * other: {response_content['other_impact']}
                                         for the following reason: [{response_content['comment'] if response_content['impact_comment'] == 'NA' else response_content['impact_comment']}]."""
+                        
+                        # Construct URL to fetch object code
+                        dep_object_file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{row["object_file_id"]}"
+                        dep_object_file_content_response = requests.get(dep_object_file_content_url, params=params)
+
+                        # Check if the object code was fetched successfully
+                        if dep_object_file_content_response.status_code == 200:
+                            dep_object_file_content = dep_object_file_content_response.text  # Get object code
+                        else:
+                            dep_object_file_content = ""
+                            logging.error(
+                                f"Failed to fetch object code using {object_code_url}. Status code: {dep_object_file_content_response.status_code}"
+                            )            
+
+                        dep_object_file_content = dep_object_file_content.splitlines(keepends=True)
+                        dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
 
                         object_data, contentinfo_data = check_dependent_code_json(
                             row["object_type"],
@@ -737,8 +787,9 @@ def gen_code_connected_json(
                             row["object_end_line"],
                             row["object_id"],
                             row["object_source_path"],
-                            fixed_code_directory,
                             RepoName,
+                            dep_object_file_content,
+                            dep_object_file_path
                         )
 
                         engine_output["objects"].append(object_data)
@@ -772,12 +823,12 @@ def gen_code_connected_json(
     return engine_output
 
 
-@app.route("/")
+@app.route("/api-python/v1/")
 def home():
     return "Welcome to CAST AI ENGINE"
 
 
-@app.route("/ProcessRequest/<string:Request_Id>")
+@app.route("/api-python/v1/ProcessRequest/<string:Request_Id>")
 def process_request(Request_Id):
 
     model_invocation_delay = 10
@@ -852,32 +903,32 @@ def process_request(Request_Id):
 
                 objects_status_list = []
 
-                # Define the directory for storing fixed source code
-                fixed_code_directory = os.path.join(
-                    output_directory,
-                    f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
-                    f"{RepoName}",
-                )
+                # # Define the directory for storing fixed source code
+                # fixed_code_directory = os.path.join(
+                #     output_directory,
+                #     f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
+                #     f"{RepoName}",
+                # )
 
-                os.makedirs(
-                    fixed_code_directory, exist_ok=True
-                )  # Create the directory for fixed source code
-                print(f"Directory '{fixed_code_directory}' created successfully!")
+                # os.makedirs(
+                #     fixed_code_directory, exist_ok=True
+                # )  # Create the directory for fixed source code
+                # print(f"Directory '{fixed_code_directory}' created successfully!")
 
-                repo_url_without_protocol = RepoURL.replace("https://", "")
+                # repo_url_without_protocol = RepoURL.replace("https://", "")
 
-                # Construct the authenticated repo URL
-                auth_repo_url = f"https://{github_token}@{repo_url_without_protocol}"
+                # # Construct the authenticated repo URL
+                # auth_repo_url = f"https://{github_token}@{repo_url_without_protocol}"
 
-                try:
-                    print(f"Cloning into {fixed_code_directory}...")
-                    subprocess.run(
-                        ["git", "clone", auth_repo_url, fixed_code_directory],
-                        check=True,
-                    )
-                    print("Repository cloned successfully.")
-                except Exception as e:
-                    print(f"Error during cloning: {e}")
+                # try:
+                #     print(f"Cloning into {fixed_code_directory}...")
+                #     subprocess.run(
+                #         ["git", "clone", auth_repo_url, fixed_code_directory],
+                #         check=True,
+                #     )
+                #     print("Repository cloned successfully.")
+                # except Exception as e:
+                #     print(f"Error during cloning: {e}")
 
                 # Create a log filename based on the input parameters and timestamp
                 filename = f"Logs_for_IssueID_{IssueID}_timestamp_{timestamp}.txt"
@@ -912,7 +963,6 @@ def process_request(Request_Id):
                                         engine_output = gen_code_connected_json(
                                             ApplicationName,
                                             TenantName,
-                                            RepoURL,
                                             RepoName,
                                             RequestId,
                                             IssueID,
@@ -927,7 +977,6 @@ def process_request(Request_Id):
                                             imaging_api_key,
                                             model_invocation_delay,
                                             json_resp,
-                                            fixed_code_directory,
                                             engine_output,
                                         )
 
@@ -975,19 +1024,19 @@ def process_request(Request_Id):
                     result = engine_output_collection.insert_one(engine_output)
                     print(f"Data inserted for requestid - {engine_output['requestid']}")
 
-                    def on_rm_error(func, path, exc_info):
-                        # Change the file or directory's permissions, then call the function again
-                        os.chmod(path, stat.S_IWRITE)  # Set write permission
-                        func(path)  # Retry the removal
+                    # def on_rm_error(func, path, exc_info):
+                    #     # Change the file or directory's permissions, then call the function again
+                    #     os.chmod(path, stat.S_IWRITE)  # Set write permission
+                    #     func(path)  # Retry the removal
 
-                    dir_path = fixed_code_directory.replace(RepoName, "")
-                    try:
-                        shutil.rmtree(
-                            dir_path, onerror=on_rm_error
-                        )  # Use onerror to handle access denied
-                        print(f"{dir_path} has been deleted permanently.")
-                    except Exception as e:
-                        print(f"Error: {e}")
+                    # dir_path = fixed_code_directory.replace(RepoName, "")
+                    # try:
+                    #     shutil.rmtree(
+                    #         dir_path, onerror=on_rm_error
+                    #     )  # Use onerror to handle access denied
+                    #     print(f"{dir_path} has been deleted permanently.")
+                    # except Exception as e:
+                    #     print(f"Error: {e}")
 
                 return (
                     "success",
@@ -996,4 +1045,4 @@ def process_request(Request_Id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=False, host='0.0.0.0', port=8081)
