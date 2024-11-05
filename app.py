@@ -1005,7 +1005,7 @@ def process_request(Request_Id):
                         replacements = {}
                         for key, value in content["filecontent"][1][0].items():
                             tuple_value = ast.literal_eval(key)
-                            replacements[tuple_value] = value
+                            replacements[tuple_value] = value.split('\n')
 
                         # Run the function with the lines and replacements
                         modified_lines = replace_lines(lines, replacements)
