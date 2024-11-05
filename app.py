@@ -1,3 +1,4 @@
+import ast
 import stat
 import subprocess
 from flask import Flask, jsonify
@@ -210,6 +211,18 @@ def count_chatgpt_tokens(ai_model_name, prompt):
     return len(tokens)
 
 
+def replace_lines(lines, replacements):
+    # Make a copy of the original lines to work with
+    modified_lines = lines[:]
+    
+    # Sort the replacements by starting line in reverse order
+    # to avoid shifting issues when replacing lines
+    for (start, end), replacement_lines in sorted(replacements.items(), reverse=True):
+        modified_lines[int(start)-1:int(end)] = replacement_lines
+    
+    return modified_lines
+
+
 def replace_code(file_content, start_line, end_line, new_code, object_id, file_path):
     """
     Replaces lines of code in a file between specified start and end lines with the provided new code.
@@ -264,7 +277,8 @@ def check_dependent_code_json(
     object_source_path,
     RepoName,
     dep_object_file_content,
-    dep_object_file_path
+    dep_object_file_path,
+    engine_output
 ):
 
     object_dictionary = {"objectid": dep_object_id, "status": "", "message": ""}
@@ -348,29 +362,37 @@ def check_dependent_code_json(
             end_line = int(dep_object_end_line)
 
             # Replace the old code with the new code in the specified file
-            updated_code = replace_code(
-                dep_object_file_content,
-                start_line,
-                end_line,
-                comment + readable_code,
-                dep_object_id,
-                dep_object_file_path
-            )
+            # updated_code = replace_code(
+            #     dep_object_file_content,
+            #     start_line,
+            #     end_line,
+            #     comment + readable_code,
+            #     dep_object_id,
+            #     dep_object_file_path
+            # )
 
             object_dictionary["status"] = "success"
             object_dictionary["message"] = response_content["comment"]
 
-            content_info_dictionary["filefullname"] = (
-                RepoName + object_source_path.split(RepoName)[-1]
-            )
-            content_info_dictionary["filecontent"] = updated_code
+            file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+
+            file_flag = False
+            if len(engine_output["contentinfo"]) > 0:
+                for file in engine_output["contentinfo"]:
+                    if file["filefullname"] == file_fullname:
+                        file_flag = True
+                        engine_output["contentinfo"][0]["filecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+
+            if not file_flag:
+                content_info_dictionary["filefullname"] = file_fullname
+                content_info_dictionary["filecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
 
         else:
             object_dictionary["status"] = "failure"
             object_dictionary["message"] = response_content["comment"]
 
         # Append the response to the result list
-        return object_dictionary, content_info_dictionary
+        return object_dictionary, content_info_dictionary, engine_output
 
     else:
         logging.warning(
@@ -380,7 +402,7 @@ def check_dependent_code_json(
         object_dictionary["status"] = "failure"
         object_dictionary["message"] = "failed because of reason: prompt too long"
 
-        return object_dictionary, content_info_dictionary
+        return object_dictionary, content_info_dictionary, engine_output
 
 
 def gen_code_connected_json(
@@ -400,7 +422,7 @@ def gen_code_connected_json(
     imaging_api_key,
     model_invocation_delay,
     json_resp,
-    engine_output,
+    engine_output
 ):
 
     object_dictionary = {"objectid": ObjectID, "status": "", "message": ""}
@@ -505,21 +527,21 @@ def gen_code_connected_json(
                     impact_object_signature = impact_object_data.get(
                         "mangling", ""
                     )  # Get impact object signature
-                    impact_object_source_location = object_data["sourceLocations"][
+                    impact_object_source_location = impact_object_data["sourceLocations"][
                         0
                     ]  # Extract source location
                     impact_object_source_path = impact_object_source_location[
                         "filePath"
                     ]  # Get source file path
-                    impact_object_field_id = impact_object_source_location[
+                    impact_object_field_id = int(impact_object_source_location[
                         "fileId"
-                    ]  # Get file ID
-                    impact_object_start_line = impact_object_source_location[
+                    ])  # Get file ID
+                    impact_object_start_line = int(impact_object_source_location[
                         "startLine"
-                    ]  # Get start line number
-                    impact_object_end_line = impact_object_source_location[
+                    ])  # Get start line number
+                    impact_object_end_line = int(impact_object_source_location[
                         "endLine"
-                    ]  # Get end line number
+                    ])  # Get end line number
 
                     impact_object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_field_id}?start-line={impact_object_start_line}&end-line={impact_object_end_line}"
                     impact_object_code_response = requests.get(
@@ -534,7 +556,7 @@ def gen_code_connected_json(
                     else:
                         impact_object_full_code = ""
                         logging.error(
-                            f"Failed to fetch object code using {object_code_url}. Status code: {object_code_response.status_code}"
+                            f"Failed to fetch object code using {impact_object_code_url}. Status code: {impact_object_code_response.status_code}"
                         )
 
                 else:
@@ -551,32 +573,32 @@ def gen_code_connected_json(
                 # Handle bookmarks associated with the impact object
                 bookmarks = impact_object.get("bookmarks")
                 if not bookmarks:
-                    impact_object_code = ""
+                    impact_object_bookmark_code = ""
                 else:
                     bookmark = bookmarks[0]
-                    impact_object_field_id = bookmark.get(
+                    impact_object_bookmark_field_id = bookmark.get(
                         "fileId", ""
                     )  # Get file ID from bookmark
                     # Calculate start and end lines for impact object code
-                    impact_object_start_line = max(
+                    impact_object_bookmark_start_line = max(
                         int(bookmark.get("startLine", 1)) - 1, 0
                     )
-                    impact_object_end_line = max(int(bookmark.get("endLine", 1)) - 1, 0)
+                    impact_object_bookmark_end_line = max(int(bookmark.get("endLine", 1)) - 1, 0)
                     # Construct URL to fetch impact object code
-                    impact_object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_field_id}?start-line={impact_object_start_line}&end-line={impact_object_end_line}"
-                    impact_object_code_response = requests.get(
-                        impact_object_code_url, params=params
+                    impact_object_bookmark_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_bookmark_field_id}?start-line={impact_object_bookmark_start_line}&end-line={impact_object_bookmark_end_line}"
+                    impact_object_bookmark_code_response = requests.get(
+                        impact_object_bookmark_code_url, params=params
                     )
 
                     # Check if the impact object code was fetched successfully
-                    if impact_object_code_response.status_code == 200:
-                        impact_object_code = (
-                            impact_object_code_response.text
+                    if impact_object_bookmark_code_response.status_code == 200:
+                        impact_object_bookmark_code = (
+                            impact_object_bookmark_code_response.text
                         )  # Get impact object code
                     else:
-                        impact_object_code = ""
+                        impact_object_bookmark_code = ""
                         logging.error(
-                            f"Failed to fetch impact object code using {impact_object_code_url}. Status code: {impact_object_code_response.status_code}"
+                            f"Failed to fetch impact object code using {impact_object_bookmark_code_url}. Status code: {impact_object_bookmark_code_response.status_code}"
                         )
 
                 # Append the impact object data to the impacts DataFrame
@@ -586,11 +608,11 @@ def gen_code_connected_json(
                         "object_type": [impact_object_type],
                         "object_signature": [impact_object_signature],
                         "object_link_type": [impact_object_link_type],
-                        "object_code": [impact_object_code],
+                        "object_bookmark_code": [impact_object_bookmark_code],
                         "object_source_path": [impact_object_source_path],
-                        "object_file_id":[impact_object_field_id],
-                        "object_start_line": [impact_object_start_line],
-                        "object_end_line": [impact_object_end_line],
+                        "object_file_id":[int(impact_object_field_id)],
+                        "object_start_line": [int(impact_object_start_line)],
+                        "object_end_line": [int(impact_object_end_line)],
                         "object_full_code": [impact_object_full_code],
                     }
                 )
@@ -628,7 +650,7 @@ def gen_code_connected_json(
         text = f"Take into account that {base_method} is used by:\n"
         for i, row in impacts.iterrows():
             text += f" {i + 1}. {row['object_type']} <{row['object_signature']}> has a <{row['object_link_type']}> dependency as found in code:\n"
-            text += f"````\n\t{row['object_code']}\n````\n"
+            text += f"````\n\t{row['object_bookmark_code']}\n````\n"
         return text
 
     if not impacts.empty:
@@ -723,25 +745,39 @@ def gen_code_connected_json(
             file_path = RepoName + object_source_path.split(RepoName)[-1]
 
             # Replace the old code with the new code in the specified file
-            updated_code = replace_code(
-                file_content,
-                start_line,
-                end_line,
-                comment + readable_code,
-                object_id,
-                file_path
-            )
+            # updated_code = replace_code(
+            #     file_content,
+            #     start_line,
+            #     end_line,
+            #     comment + readable_code,
+            #     object_id,
+            #     file_path
+            # )
 
             object_dictionary["status"] = "success"
             object_dictionary["message"] = response_content["comment"]
 
-            content_info_dictionary["filefullname"] = (
-                RepoName + object_source_path.split(RepoName)[-1]
-            )
-            content_info_dictionary["filecontent"] = updated_code
+            file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+
+            file_flag = False
+            if len(engine_output["contentinfo"]) > 0:
+                for file in engine_output["contentinfo"]:
+                    if file["filefullname"] == file_fullname:
+                        file_flag = True
+                        engine_output["contentinfo"][0]["filecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+
+            if not file_flag:
+                content_info_dictionary["filefullname"] = file_fullname
+                content_info_dictionary["filecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
 
             if (
-                response_content["signature_impact"].upper() == "YES"
+                content_info_dictionary["filefullname"]
+                or content_info_dictionary["filecontent"]
+            ):
+                engine_output["contentinfo"].append(content_info_dictionary)
+
+            if (
+                response_content["signature_impact"].upper() == "NO"
                 or response_content["exception_impact"].upper() == "YES"
                 or response_content["enclosed_impact"].upper() == "YES"
                 or response_content["other_impact"].upper() == "YES"
@@ -750,7 +786,7 @@ def gen_code_connected_json(
                     for i, row in impacts.iterrows():
                         parent_info = f"""The {row['object_type']} <{row['object_signature']}> source code is the following:
                                         ```
-                                        {row['object_code']}
+                                        {row['object_full_code']}
                                         ```
                                         This source code is defined in the {object_type} <{file_path}>.
                                         The {object_type} <{file_path}> was updated by an AI the following way: [{response_content['comment']}].
@@ -762,7 +798,7 @@ def gen_code_connected_json(
                                         for the following reason: [{response_content['comment'] if response_content['impact_comment'] == 'NA' else response_content['impact_comment']}]."""
                         
                         # Construct URL to fetch object code
-                        dep_object_file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{row["object_file_id"]}"
+                        dep_object_file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{int(row["object_file_id"])}"
                         dep_object_file_content_response = requests.get(dep_object_file_content_url, params=params)
 
                         # Check if the object code was fetched successfully
@@ -777,7 +813,7 @@ def gen_code_connected_json(
                         dep_object_file_content = dep_object_file_content.splitlines(keepends=True)
                         dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
 
-                        object_data, contentinfo_data = check_dependent_code_json(
+                        object_data, contentinfo_data, engine_output = check_dependent_code_json(
                             row["object_type"],
                             row["object_signature"],
                             row["object_full_code"],
@@ -789,7 +825,8 @@ def gen_code_connected_json(
                             row["object_source_path"],
                             RepoName,
                             dep_object_file_content,
-                            dep_object_file_path
+                            dep_object_file_path,
+                            engine_output
                         )
 
                         engine_output["objects"].append(object_data)
@@ -813,12 +850,6 @@ def gen_code_connected_json(
         object_dictionary["message"] = "failed because of reason: prompt too long"
 
     engine_output["objects"].append(object_dictionary)
-
-    if (
-        content_info_dictionary["filefullname"]
-        or content_info_dictionary["filecontent"]
-    ):
-        engine_output["contentinfo"].append(content_info_dictionary)
 
     return engine_output
 
@@ -903,33 +934,6 @@ def process_request(Request_Id):
 
                 objects_status_list = []
 
-                # # Define the directory for storing fixed source code
-                # fixed_code_directory = os.path.join(
-                #     output_directory,
-                #     f"Fixed_SourceCode_for_IssueID-{IssueID}_timestamp_{timestamp}",
-                #     f"{RepoName}",
-                # )
-
-                # os.makedirs(
-                #     fixed_code_directory, exist_ok=True
-                # )  # Create the directory for fixed source code
-                # print(f"Directory '{fixed_code_directory}' created successfully!")
-
-                # repo_url_without_protocol = RepoURL.replace("https://", "")
-
-                # # Construct the authenticated repo URL
-                # auth_repo_url = f"https://{github_token}@{repo_url_without_protocol}"
-
-                # try:
-                #     print(f"Cloning into {fixed_code_directory}...")
-                #     subprocess.run(
-                #         ["git", "clone", auth_repo_url, fixed_code_directory],
-                #         check=True,
-                #     )
-                #     print("Repository cloned successfully.")
-                # except Exception as e:
-                #     print(f"Error during cloning: {e}")
-
                 # Create a log filename based on the input parameters and timestamp
                 filename = f"Logs_for_IssueID_{IssueID}_timestamp_{timestamp}.txt"
 
@@ -947,7 +951,7 @@ def process_request(Request_Id):
                     prompt_id = requestdetail["promptid"]
 
                     prompt_library_documents = prompt_library_collection.find(
-                        {"issueid": IssueID}
+                        {"issueid": int(IssueID)}
                     )
 
                     for prompt_library_doc in prompt_library_documents:
@@ -977,12 +981,8 @@ def process_request(Request_Id):
                                             imaging_api_key,
                                             model_invocation_delay,
                                             json_resp,
-                                            engine_output,
+                                            engine_output
                                         )
-
-                                        # objects_status_list.append(
-                                        #     object_data["status"]
-                                        # )
 
                     # Create a filename incorporating the Application Name, Request ID, Issue ID, and timestamp
                     filename = (
@@ -999,6 +999,22 @@ def process_request(Request_Id):
                         engine_output["status"] = "failure"
                     else:
                         engine_output["status"] = "partial success"
+
+                    for content in engine_output["contentinfo"]:
+                        lines = content["filecontent"][0]
+                        replacements = {}
+                        for key, value in content["filecontent"][1][0].items():
+                            tuple_value = ast.literal_eval(key)
+                            replacements[tuple_value] = value.split('\n')
+
+                        # Run the function with the lines and replacements
+                        modified_lines = replace_lines(lines, replacements)
+                        content["updatedfilecontent"] = modified_lines
+
+                        # with open("original_file.txt", "w") as of:
+                        #     of.writelines(lines)
+                        # with open("modified_file.txt", "w") as mf:
+                        #     mf.writelines(modified_lines)
 
                     # Write the JSON response data to the specified file with pretty formatting
                     with open(filename, "w") as json_file:
@@ -1024,19 +1040,6 @@ def process_request(Request_Id):
                     result = engine_output_collection.insert_one(engine_output)
                     print(f"Data inserted for requestid - {engine_output['requestid']}")
 
-                    # def on_rm_error(func, path, exc_info):
-                    #     # Change the file or directory's permissions, then call the function again
-                    #     os.chmod(path, stat.S_IWRITE)  # Set write permission
-                    #     func(path)  # Retry the removal
-
-                    # dir_path = fixed_code_directory.replace(RepoName, "")
-                    # try:
-                    #     shutil.rmtree(
-                    #         dir_path, onerror=on_rm_error
-                    #     )  # Use onerror to handle access denied
-                    #     print(f"{dir_path} has been deleted permanently.")
-                    # except Exception as e:
-                    #     print(f"Error: {e}")
 
                 return (
                     "success",
