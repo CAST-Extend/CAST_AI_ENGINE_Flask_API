@@ -1011,6 +1011,11 @@ def process_request(Request_Id):
                         modified_lines = replace_lines(lines, replacements)
                         content["updatedfilecontent"] = modified_lines
 
+                        # with open("original_file.txt", "w") as of:
+                        #     of.writelines(lines)
+                        # with open("modified_file.txt", "w") as mf:
+                        #     mf.writelines(modified_lines)
+
                     # Write the JSON response data to the specified file with pretty formatting
                     with open(filename, "w") as json_file:
                         json.dump(
