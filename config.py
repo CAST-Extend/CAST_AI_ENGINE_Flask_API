@@ -9,8 +9,6 @@ class Config:
     IMAGING_URL = ''
     IMAGING_API_KEY = ''
 
-    GITHUB_TOKEN = ''
-
     MONGODB_CONNECTION_STRING = ''
 
     
