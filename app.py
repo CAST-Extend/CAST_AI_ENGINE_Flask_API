@@ -16,6 +16,8 @@ from openai import AzureOpenAI
 from datetime import datetime
 import warnings
 from pymongo import MongoClient
+import secrets
+import string
 
 from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError
 
@@ -34,8 +36,6 @@ ai_model_max_tokens = app.config["MODEL_MAX_TOKENS"]
 imaging_url = app.config["IMAGING_URL"]
 imaging_api_key = app.config["IMAGING_API_KEY"]
 
-github_token = app.config["GITHUB_TOKEN"]
-
 mongo_uri = app.config["MONGODB_CONNECTION_STRING"]
 
 # Suppress specific FutureWarning
@@ -44,6 +44,11 @@ warnings.filterwarnings(
     category=FutureWarning,
     message="`clean_up_tokenization_spaces` was not set.*",
 )
+
+
+def generate_unique_alphanumeric(length=24):
+    characters = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(characters) for _ in range(length))
 
 
 def fix_common_json_issues(json_string):
@@ -890,6 +895,7 @@ def process_request(Request_Id):
     engine_input_collection = db["EngineInput"]
     prompt_library_collection = db["PromptLibrary"]
     engine_output_collection = db["EngineOutput"]
+    files_content_collection = db["FilesContent"]
 
     # Optionally, print some documents from the collection (this assumes the collection exists)
     engine_input_documents = engine_input_collection.find()
@@ -1009,7 +1015,15 @@ def process_request(Request_Id):
 
                         # Run the function with the lines and replacements
                         modified_lines = replace_lines(lines, replacements)
-                        content["updatedfilecontent"] = modified_lines
+                      
+                        # Generate a unique 24-character alphanumeric string
+                        unique_string = generate_unique_alphanumeric()
+                        content["fileid"] = unique_string
+
+                        files_content_data = { "requestid": RequestId, "fileid":unique_string, "updatedfilecontent": modified_lines, "createddate":timestamp }
+
+                        res = files_content_collection.insert_one(files_content_data)
+                        print(f"Data inserted for file - {unique_string}")
 
                         # with open("original_file.txt", "w") as of:
                         #     of.writelines(lines)
