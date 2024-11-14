@@ -2,6 +2,7 @@ import ast
 import stat
 import subprocess
 from flask import Flask, jsonify
+from flask_cors import CORS
 from config import Config
 import re
 import shutil
@@ -24,6 +25,7 @@ from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError
 
 
 app = Flask(__name__)
+CORS(app)
 # Load configuration from config.py
 app.config.from_object(Config)
 
@@ -859,7 +861,11 @@ def gen_code_connected_json(
 
 @app.route("/api-python/v1/")
 def home():
-    return "Welcome to CAST AI ENGINE"
+
+    return ({
+        'status': 200,
+        'success' : 'Welcome to CAST Code Fix AI ENGINE'
+    })
 
 
 @app.route("/api-python/v1/ProcessRequest/<string:Request_Id>")
@@ -893,13 +899,6 @@ def process_request(Request_Id):
         # Optionally, print some documents from the collection (this assumes the collection exists)
         engine_input_documents = engine_input_collection.find()
         for engine_input_doc in engine_input_documents:
-
-            # SourceCodeLocation = "C:\\ProgramData\\CAST\\AIP-Console-Standalone\\shared\\upload\\Webgoat\\main_sources\\"
-
-            # Get the current working directory
-            current_directory = os.getcwd()
-
-
 
             # result = []  # Initialize result list to hold processed data
 
@@ -1016,10 +1015,18 @@ def process_request(Request_Id):
                         print(f"Data inserted for requestid - {engine_output['requestid']}")
 
 
-                    return (
-                        "success",
-                        200,
-                    )
+                    return ({
+                        'status': 200,
+                        'success' : f'Req -> {Request_Id} Successful'
+                    })
+                
+                else:
+
+                    return ({
+                        'status': 401,
+                        'success' : f'Req -> {Request_Id} Not Found'
+                    })
+
     except Exception as e:
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
