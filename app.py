@@ -778,7 +778,7 @@ def gen_code_connected_json(
                     engine_output["contentinfo"].append(content_info_dictionary)
 
                 if (
-                    response_content["signature_impact"].upper() == "NO"
+                    response_content["signature_impact"].upper() == "YES"
                     or response_content["exception_impact"].upper() == "YES"
                     or response_content["enclosed_impact"].upper() == "YES"
                     or response_content["other_impact"].upper() == "YES"
@@ -864,7 +864,7 @@ def home():
 
     return ({
         'status': 200,
-        'success' : 'Welcome to CAST Code Fix AI ENGINE'
+        'success' : 'Welcome to CAST Code Fix AI ENGINE.'
     })
 
 
@@ -915,6 +915,7 @@ def process_request(Request_Id):
                     engine_output = {
                         "requestid": RequestId,
                         "issueid": IssueID,
+                        "applicationid": ApplicationName,
                         "objects": [],
                         "contentinfo": [],
                         "status": "",
@@ -1017,20 +1018,24 @@ def process_request(Request_Id):
 
                     return ({
                         'status': 200,
-                        'success' : f'Req -> {Request_Id} Successful'
+                        'success' : f'Req -> {Request_Id} Successful.'
                     })
                 
                 else:
 
                     return ({
-                        'status': 401,
-                        'success' : f'Req -> {Request_Id} Not Found'
+                        'status': 404,
+                        'success' : f'Req -> {Request_Id} Not Found or Incorrect EngineInput!'
                     })
 
     except Exception as e:
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
         log_error_to_mongo(e, "process_request")
+        return ({
+            'status': 500,
+            'success' : f'Internal Server Error -> {e}'
+        })
 
 
 if __name__ == "__main__":
