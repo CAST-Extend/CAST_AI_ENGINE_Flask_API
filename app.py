@@ -1025,7 +1025,7 @@ def process_request(Request_Id):
 
                     return ({
                         'status': 404,
-                        'success' : f'Req -> {Request_Id} Not Found or Incorrect EngineInput!'
+                        'failed' : f'Req -> {Request_Id} Not Found or Incorrect EngineInput!'
                     })
 
     except Exception as e:
@@ -1034,7 +1034,7 @@ def process_request(Request_Id):
         log_error_to_mongo(e, "process_request")
         return ({
             'status': 500,
-            'success' : f'Internal Server Error -> {e}'
+            'failed' : f'Internal Server Error -> {e}'
         })
 
 
