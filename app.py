@@ -22,6 +22,10 @@ import string
 import traceback
 
 from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError
+from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: ignore
+
+# Suppress the InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 
 app = Flask(__name__)
@@ -454,7 +458,7 @@ def gen_code_connected_json(
         # Construct URL to fetch object details
         object_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}?select=source-locations"
         params = {"api-key": imaging_api_key}
-        object_response = requests.get(object_url, params=params)
+        object_response = requests.get(object_url, params=params, verify=False)
 
         # Check if object details were fetched successfully
         if object_response.status_code == 200:
@@ -472,7 +476,7 @@ def gen_code_connected_json(
 
             # Construct URL to fetch object code
             object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{object_field_id}?start-line={object_start_line}&end-line={object_end_line}"
-            object_code_response = requests.get(object_code_url, params=params)
+            object_code_response = requests.get(object_code_url, params=params, verify=False)
 
             # Check if the object code was fetched successfully
             if object_code_response.status_code == 200:
@@ -485,7 +489,7 @@ def gen_code_connected_json(
 
             # Fetch callees for the current object
             object_callees_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}/callees"
-            object_callees_response = requests.get(object_callees_url, params=params)
+            object_callees_response = requests.get(object_callees_url, params=params, verify=False)
 
             # Check if callees were fetched successfully
             if object_callees_response.status_code == 200:
@@ -516,7 +520,7 @@ def gen_code_connected_json(
 
             # Fetch callers for the current object
             object_callers_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}/callers?select=bookmarks"
-            object_callers_response = requests.get(object_callers_url, params=params)
+            object_callers_response = requests.get(object_callers_url, params=params, verify=False)
 
             # Check if callers were fetched successfully
             if object_callers_response.status_code == 200:
@@ -525,7 +529,7 @@ def gen_code_connected_json(
                 for impact_object in impact_objects:
                     impact_object_id = impact_object.get("id")  # Get impact object ID
                     impact_object_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{impact_object_id}?select=source-locations"
-                    impact_object_response = requests.get(impact_object_url, params=params)
+                    impact_object_response = requests.get(impact_object_url, params=params, verify=False)
 
                     # Check if impact object data was fetched successfully
                     if impact_object_response.status_code == 200:
@@ -556,7 +560,7 @@ def gen_code_connected_json(
 
                         impact_object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_field_id}?start-line={impact_object_start_line}&end-line={impact_object_end_line}"
                         impact_object_code_response = requests.get(
-                            impact_object_code_url, params=params
+                            impact_object_code_url, params=params, verify=False
                         )
 
                         # Check if the object code was fetched successfully
@@ -598,7 +602,7 @@ def gen_code_connected_json(
                         # Construct URL to fetch impact object code
                         impact_object_bookmark_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_bookmark_field_id}?start-line={impact_object_bookmark_start_line}&end-line={impact_object_bookmark_end_line}"
                         impact_object_bookmark_code_response = requests.get(
-                            impact_object_bookmark_code_url, params=params
+                            impact_object_bookmark_code_url, params=params, verify=False
                         )
 
                         # Check if the impact object code was fetched successfully
@@ -741,7 +745,7 @@ def gen_code_connected_json(
 
                 # Construct URL to fetch object code
                 file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{object_field_id}"
-                file_content_response = requests.get(file_content_url, params=params)
+                file_content_response = requests.get(file_content_url, params=params, verify=False)
 
                 # Check if the object code was fetched successfully
                 if file_content_response.status_code == 200:
@@ -800,7 +804,7 @@ def gen_code_connected_json(
                             
                             # Construct URL to fetch object code
                             dep_object_file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{int(row["object_file_id"])}"
-                            dep_object_file_content_response = requests.get(dep_object_file_content_url, params=params)
+                            dep_object_file_content_response = requests.get(dep_object_file_content_url, params=params, verify=False)
 
                             # Check if the object code was fetched successfully
                             if dep_object_file_content_response.status_code == 200:
@@ -897,144 +901,148 @@ def process_request(Request_Id):
         files_content_collection = get_mongo_collection("FilesContent")
 
         # Optionally, print some documents from the collection (this assumes the collection exists)
-        engine_input_documents = engine_input_collection.find()
-        for engine_input_doc in engine_input_documents:
+        engine_input_document = engine_input_collection.find_one({"request.requestid":f"{Request_Id}"})
 
-            # result = []  # Initialize result list to hold processed data
+        # print(engine_input_document)
 
-            for request in engine_input_doc["request"]:
-                if request["requestid"] == Request_Id:
+        # result = []  # Initialize result list to hold processed data
 
-                    ApplicationName = request["applicationid"]
-                    TenantName = request["tenantid"]
-                    RepoURL = request["repourl"]
-                    RepoName = RepoURL.split("/")[-1].replace(".git", "")
-                    RequestId = request["requestid"]
-                    IssueID = request["issueid"]
+        for request in engine_input_document["request"]:
+            if request["requestid"] == Request_Id:
 
-                    engine_output = {
-                        "requestid": RequestId,
-                        "issueid": IssueID,
-                        "applicationid": ApplicationName,
-                        "objects": [],
-                        "contentinfo": [],
-                        "status": "",
-                        "createddate": timestamp,
-                    }
+                ApplicationName = request["applicationid"]
+                TenantName = request["tenantid"]
+                RepoURL = request["repourl"]
+                RepoName = RepoURL.split("/")[-1].replace(".git", "")
+                RequestId = request["requestid"]
+                IssueID = request["issueid"]
 
-                    objects_status_list = []
+                engine_output = {
+                    "requestid": RequestId,
+                    "issueid": IssueID,
+                    "applicationid": ApplicationName,
+                    "objects": [],
+                    "contentinfo": [],
+                    "status": "",
+                    "createddate": timestamp,
+                }
 
-                    for requestdetail in request["requestdetail"]:
-                        prompt_id = requestdetail["promptid"]
+                objects_status_list = []
 
-                        prompt_library_documents = prompt_library_collection.find(
-                            {"issueid": int(IssueID)}
-                        )
+                for requestdetail in request["requestdetail"]:
+                    prompt_id = requestdetail["promptid"]
 
-                        for prompt_library_doc in prompt_library_documents:
+                    prompt_library_documents = prompt_library_collection.find(
+                        {"issueid": int(IssueID)}
+                    )
 
-                            for technology in prompt_library_doc["technologies"]:
-                                for prompt in technology["prompts"]:
-                                    if prompt_id == prompt["promptid"]:
-                                        PromptContent = prompt["prompt"]
-                                        for objectdetail in requestdetail["objectdetails"]:
-                                            ObjectID = objectdetail["objectid"]
+                    for prompt_library_doc in prompt_library_documents:
 
-                                            # Call the gen_code_connected_json function to process the request and generate code updates
-                                            engine_output = gen_code_connected_json(
-                                                ApplicationName,
-                                                TenantName,
-                                                RepoName,
-                                                RequestId,
-                                                IssueID,
-                                                ObjectID,
-                                                PromptContent,
-                                                ai_model_name,
-                                                ai_model_version,
-                                                ai_model_url,
-                                                ai_model_api_key,
-                                                ai_model_max_tokens,
-                                                imaging_url,
-                                                imaging_api_key,
-                                                model_invocation_delay,
-                                                json_resp,
-                                                engine_output
-                                            )
+                        for technology in prompt_library_doc["technologies"]:
+                            for prompt in technology["prompts"]:
+                                if prompt_id == prompt["promptid"]:
+                                    PromptContent = prompt["prompt"]
+                                    for objectdetail in requestdetail["objectdetails"]:
+                                        ObjectID = objectdetail["objectid"]
 
-
-                        for object in engine_output['objects']:
-                            objects_status_list.append(object['status'])
-
-                        if all(item == "success" for item in objects_status_list):
-                            engine_output["status"] = "success"
-                        elif all(item == "failure" for item in objects_status_list):
-                            engine_output["status"] = "failure"
-                        else:
-                            engine_output["status"] = "partial success"
-
-                        for content in engine_output["contentinfo"]:
-                            lines = content["filecontent"][0]
-                            replacements = {}
-                            for key, value in content["filecontent"][1][0].items():
-                                tuple_value = ast.literal_eval(key)
-                                replacements[tuple_value] = value.split('\n')
-
-                            # Run the function with the lines and replacements
-                            modified_lines = replace_lines(lines, replacements)
-                        
-                            # Generate a unique 24-character alphanumeric string
-                            unique_string = generate_unique_alphanumeric()
-                            content["fileid"] = unique_string
-
-                            files_content_data = { "requestid": RequestId, "fileid":unique_string, "updatedfilecontent": modified_lines, "createddate":timestamp }
-
-                            res = files_content_collection.insert_one(files_content_data)
-                            print(f"Data inserted for file - {unique_string}")
-
-                            # with open("original_file.txt", "w") as of:
-                            #     of.writelines(lines)
-                            # with open("modified_file.txt", "w") as mf:
-                            #     mf.writelines(modified_lines)
+                                        # Call the gen_code_connected_json function to process the request and generate code updates
+                                        engine_output = gen_code_connected_json(
+                                            ApplicationName,
+                                            TenantName,
+                                            RepoName,
+                                            RequestId,
+                                            IssueID,
+                                            ObjectID,
+                                            PromptContent,
+                                            ai_model_name,
+                                            ai_model_version,
+                                            ai_model_url,
+                                            ai_model_api_key,
+                                            ai_model_max_tokens,
+                                            imaging_url,
+                                            imaging_api_key,
+                                            model_invocation_delay,
+                                            json_resp,
+                                            engine_output
+                                        )
 
 
-                        # Check if data already exists
-                        existing_record = engine_output_collection.find_one(
+                    for object in engine_output['objects']:
+                        objects_status_list.append(object['status'])
+
+                    if all(item == "success" for item in objects_status_list):
+                        engine_output["status"] = "success"
+                    elif all(item == "failure" for item in objects_status_list):
+                        engine_output["status"] = "failure"
+                    else:
+                        engine_output["status"] = "partial success"
+
+                    for content in engine_output["contentinfo"]:
+                        lines = content["filecontent"][0]
+                        replacements = {}
+                        for key, value in content["filecontent"][1][0].items():
+                            tuple_value = ast.literal_eval(key)
+                            replacements[tuple_value] = value.split('\n')
+
+                        # Run the function with the lines and replacements
+                        modified_lines = replace_lines(lines, replacements)
+                    
+                        # Generate a unique 24-character alphanumeric string
+                        unique_string = generate_unique_alphanumeric()
+                        content["fileid"] = unique_string
+
+                        files_content_data = { "requestid": RequestId, "fileid":unique_string, "updatedfilecontent": modified_lines, "createddate":timestamp }
+
+                        res = files_content_collection.insert_one(files_content_data)
+                        print(f"Data inserted for file - {unique_string}")
+
+                        # with open("original_file.txt", "w") as of:
+                        #     of.writelines(lines)
+                        # with open("modified_file.txt", "w") as mf:
+                        #     mf.writelines(modified_lines)
+
+
+                    # Check if data already exists
+                    existing_record = engine_output_collection.find_one(
+                        {"requestid": engine_output["requestid"]}
+                    )
+
+                    if existing_record:
+                        # Delete the existing record
+                        engine_output_collection.delete_one(
                             {"requestid": engine_output["requestid"]}
                         )
+                        print(
+                            f"Existing requestid - {engine_output['requestid']} deleted."
+                        )
 
-                        if existing_record:
-                            # Delete the existing record
-                            engine_output_collection.delete_one(
-                                {"requestid": engine_output["requestid"]}
-                            )
-                            print(
-                                f"Existing requestid - {engine_output['requestid']} deleted."
-                            )
-
-                        # Insert the new data
-                        result = engine_output_collection.insert_one(engine_output)
-                        print(f"Data inserted for requestid - {engine_output['requestid']}")
+                    # Insert the new data
+                    result = engine_output_collection.insert_one(engine_output)
+                    print(f"Data inserted for requestid - {engine_output['requestid']}")
 
 
-                    return ({
-                        'status': 200,
-                        'success' : f'Req -> {Request_Id} Successful.'
-                    })
-                
-                else:
+                return ({
+                    "status": "success",
+                    "message" : f"Req -> {Request_Id} Successful.",
+                    "code": 200
+                })
+            
+            else:
 
-                    return ({
-                        'status': 404,
-                        'failed' : f'Req -> {Request_Id} Not Found or Incorrect EngineInput!'
-                    })
+                return ({
+                    "status": "failed",
+                    "message" : f"Req -> {Request_Id} Not Found or Incorrect EngineInput!",
+                    "code": 404
+                })
 
     except Exception as e:
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
         log_error_to_mongo(e, "process_request")
         return ({
-            'status': 500,
-            'failed' : f'Internal Server Error -> {e}'
+            "status": "failed",
+            "message" : f"Internal Server Error -> {e}",
+            "code": 500
         })
 
 
