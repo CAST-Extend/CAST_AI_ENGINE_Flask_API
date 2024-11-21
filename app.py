@@ -302,7 +302,7 @@ def check_dependent_code_json(
 ):
     try:
         object_dictionary = {"objectid": dep_object_id, "status": "", "message": ""}
-        content_info_dictionary = {"filefullname": "", "filecontent": ""}
+        content_info_dictionary = {"filefullname": "", "originalfilecontent": ""}
 
         json_dep_resp = """
         {
@@ -391,11 +391,11 @@ def check_dependent_code_json(
                     for file in engine_output["contentinfo"]:
                         if file["filefullname"] == file_fullname:
                             file_flag = True
-                            engine_output["contentinfo"][0]["filecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+                            engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
 
                 if not file_flag:
                     content_info_dictionary["filefullname"] = file_fullname
-                    content_info_dictionary["filecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
+                    content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
 
             else:
                 object_dictionary["status"] = "failure"
@@ -441,7 +441,7 @@ def gen_code_connected_json(
     try:
 
         object_dictionary = {"objectid": ObjectID, "status": "", "message": ""}
-        content_info_dictionary = {"filefullname": "", "filecontent": ""}
+        content_info_dictionary = {"filefullname": "", "originalfilecontent": ""}
 
         object_id = ObjectID
         logging.info(
@@ -737,9 +737,11 @@ def gen_code_connected_json(
 
                 new_code = response_content["code"]  # Extract new code from the response
                 # Convert the new_code string back to its readable format
-                readable_code = (
-                    new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-                )
+
+                readable_code = new_code
+                # readable_code = (
+                #     new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+                # )
                 start_line = object_start_line
                 end_line = object_end_line
 
@@ -769,15 +771,15 @@ def gen_code_connected_json(
                     for file in engine_output["contentinfo"]:
                         if file["filefullname"] == file_fullname:
                             file_flag = True
-                            engine_output["contentinfo"][0]["filecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+                            engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
 
                 if not file_flag:
                     content_info_dictionary["filefullname"] = file_fullname
-                    content_info_dictionary["filecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
+                    content_info_dictionary["originalfilecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
 
                 if (
                     content_info_dictionary["filefullname"]
-                    or content_info_dictionary["filecontent"]
+                    or content_info_dictionary["originalfilecontent"]
                 ):
                     engine_output["contentinfo"].append(content_info_dictionary)
 
@@ -838,7 +840,7 @@ def gen_code_connected_json(
 
                             if (
                                 contentinfo_data["filefullname"]
-                                or contentinfo_data["filecontent"]
+                                or contentinfo_data["originalfilecontent"]
                             ):
                                 engine_output["contentinfo"].append(contentinfo_data)
 
@@ -978,14 +980,18 @@ def process_request(Request_Id):
                         engine_output["status"] = "partial success"
 
                     for content in engine_output["contentinfo"]:
-                        lines = content["filecontent"][0]
+                        lines = content["originalfilecontent"][0]
                         replacements = {}
-                        for key, value in content["filecontent"][1][0].items():
+                        for key, value in content["originalfilecontent"][1][0].items():
                             tuple_value = ast.literal_eval(key)
                             replacements[tuple_value] = value.split('\n')
 
+                            replacements[tuple_value] = [line + "\n" for line in replacements[tuple_value]]
+
                         # Run the function with the lines and replacements
                         modified_lines = replace_lines(lines, replacements)
+
+                        modified_lines = "".join(modified_lines)
                     
                         # Generate a unique 24-character alphanumeric string
                         unique_string = generate_unique_alphanumeric()
