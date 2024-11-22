@@ -20,6 +20,9 @@ from pymongo import MongoClient
 import secrets
 import string
 import traceback
+from queue import Queue
+from threading import Thread
+
 
 from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError
 from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: ignore
@@ -150,13 +153,10 @@ def ask_ai_model(
         messages = [{"role": "user", "content": prompt_content}]
 
         # Prepare the payload for the AI API
-        payload = {"model": ai_model_name, "messages": messages, "temperature": 0}
+        payload = { "model": ai_model_name, "messages": messages, "temperature": 0 }
 
         # Set up headers for the API request
-        headers = {
-            "Authorization": f"Bearer {ai_model_api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = { "Authorization": f"Bearer {ai_model_api_key}", "Content-Type": "application/json" }
 
         # Loop for retrying the request in case of errors or invalid JSON.
         for attempt in range(1, MAX_RETRIES + 1):
@@ -174,9 +174,7 @@ def ask_ai_model(
                 try:
                     response_json = json.loads(response_content)
                     ai_response = response_json["choices"][0]["message"]["content"]
-                    ai_response = json.loads(
-                        ai_response
-                    )  # Successfully parsed JSON, return it.
+                    ai_response = json.loads(ai_response)  # Successfully parsed JSON, return it.
                     return ai_response
                 except json.JSONDecodeError as e:
                     # Log the JSON parsing error and prepare for retry if needed.
@@ -196,13 +194,11 @@ def ask_ai_model(
 
                         messages = [{"role": "user", "content": prompt_content}]
                         # Prepare the payload for the AI API
-                        payload = {"model": ai_model_name, "messages": messages, "temperature": 0}
+                        payload = { "model": ai_model_name, "messages": messages, "temperature": 0 }
 
                     else:
                         # If max retries reached, log an error and return None.
-                        logging.error(
-                            "Max retries reached. Failed to obtain valid JSON from AI."
-                        )
+                        logging.error("Max retries reached. Failed to obtain valid JSON from AI.")
                         return None
 
             except Exception as e:
@@ -221,7 +217,7 @@ def ask_ai_model(
 
                     messages = [{"role": "user", "content": prompt_content}]
                     # Prepare the payload for the AI API
-                    payload = {"model": ai_model_name, "messages": messages, "temperature": 0}
+                    payload = { "model": ai_model_name, "messages": messages, "temperature": 0 }
 
                 else:
                     # If max retries reached due to persistent errors, log and return None.
@@ -332,9 +328,7 @@ def check_dependent_code_json(
                         """
 
         # Clean up prompt content for formatting issues
-        prompt_content = (
-            prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-        )
+        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
         logging.info(f"Prompt Content: {prompt_content}")
 
@@ -343,9 +337,7 @@ def check_dependent_code_json(
 
         # Count tokens for the AI model's input
         code_token = count_chatgpt_tokens(ai_model_name, str(dep_obj_code))
-        prompt_token = count_chatgpt_tokens(
-            ai_model_name, "\n".join([json.dumps(m) for m in messages])
-        )
+        prompt_token = count_chatgpt_tokens(ai_model_name, "\n".join([json.dumps(m) for m in messages]))
 
         # Determine target response size
         target_response_size = int(code_token * 1.2 + 500)
@@ -375,9 +367,7 @@ def check_dependent_code_json(
 
                 new_code = response_content["code"]  # Extract new code from the response
                 # Convert the new_code string back to its readable format
-                readable_code = (
-                    new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-                )
+                readable_code = (new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
                 start_line = int(dep_object_start_line)
                 end_line = int(dep_object_end_line)
 
@@ -405,9 +395,7 @@ def check_dependent_code_json(
             return object_dictionary, content_info_dictionary, engine_output
 
         else:
-            logging.warning(
-                "Prompt too long; skipping."
-            )  # Warn if the prompt exceeds limits
+            logging.warning("Prompt too long; skipping.")  # Warn if the prompt exceeds limits
 
             object_dictionary["status"] = "failure"
             object_dictionary["message"] = "failed because of reason: prompt too long"
@@ -444,16 +432,12 @@ def gen_code_connected_json(
         content_info_dictionary = {"filefullname": "", "originalfilecontent": ""}
 
         object_id = ObjectID
-        logging.info(
-            "---------------------------------------------------------------------------------------------------------------------------------------"
-        )
+        logging.info("---------------------------------------------------------------------------------------------------------------------------------------")
         logging.info(f"Processing object_id -> {object_id}.....")
 
         # Initialize DataFrames to store exceptions and impacts
         exceptions = pd.DataFrame(columns=["link_type", "exception"])
-        impacts = pd.DataFrame(
-            columns=["object_type", "object_signature", "object_link_type", "object_code"]
-        )
+        impacts = pd.DataFrame(columns=["object_type", "object_signature", "object_link_type", "object_code"])
 
         # Construct URL to fetch object details
         object_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}?select=source-locations"
@@ -465,9 +449,7 @@ def gen_code_connected_json(
             object_data = object_response.json()  # Parse object data
             object_type = object_data["typeId"]  # Get object type
             object_signature = object_data["mangling"]  # Get object signature
-            object_technology = object_data["programmingLanguage"][
-                "name"
-            ]  # Get programming language
+            object_technology = object_data["programmingLanguage"]["name"]  # Get programming language
             source_location = object_data["sourceLocations"][0]  # Extract source location
             object_source_path = source_location["filePath"]  # Get source file path
             object_field_id = source_location["fileId"]  # Get file ID
@@ -483,9 +465,7 @@ def gen_code_connected_json(
                 obj_code = object_code_response.text  # Get object code
             else:
                 obj_code = ""
-                logging.error(
-                    f"Failed to fetch object code using {object_code_url}. Status code: {object_code_response.status_code}"
-                )
+                logging.error(f"Failed to fetch object code using {object_code_url}. Status code: {object_code_response.status_code}")
 
             # Fetch callees for the current object
             object_callees_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}/callees"
@@ -496,27 +476,12 @@ def gen_code_connected_json(
                 object_exceptions = object_callees_response.json()  # Parse exceptions data
                 # Process each exception for the current object
                 for object_exception in object_exceptions:
-                    link_type = object_exception.get(
-                        "linkType", ""
-                    ).lower()  # Get link type
-                    if link_type in [
-                        "raise",
-                        "throw",
-                        "catch",
-                    ]:  # Check for relevant link types
-                        new_row = pd.DataFrame(
-                            {
-                                "link_type": [object_exception.get("linkType", "")],
-                                "exception": [object_exception.get("name", "")],
-                            }
-                        )
-                        exceptions = pd.concat(
-                            [exceptions, new_row], ignore_index=True
-                        )  # Append to exceptions DataFrame
+                    link_type = object_exception.get("linkType", "").lower()  # Get link type
+                    if link_type in ["raise","throw","catch"]:  # Check for relevant link types
+                        new_row = pd.DataFrame( { "link_type": [object_exception.get("linkType", "")],"exception": [object_exception.get("name", "")],})
+                        exceptions = pd.concat([exceptions, new_row], ignore_index=True)  # Append to exceptions DataFrame
             else:
-                logging.error(
-                    f"Failed to fetch callees using {object_callees_url}. Status code: {object_callees_response.status_code}"
-                )
+                logging.error(f"Failed to fetch callees using {object_callees_url}. Status code: {object_callees_response.status_code}")
 
             # Fetch callers for the current object
             object_callers_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/objects/{object_id}/callers?select=bookmarks"
@@ -533,57 +498,31 @@ def gen_code_connected_json(
 
                     # Check if impact object data was fetched successfully
                     if impact_object_response.status_code == 200:
-                        impact_object_data = (
-                            impact_object_response.json()
-                        )  # Parse impact object data
-                        impact_object_type = impact_object_data.get(
-                            "typeId", ""
-                        )  # Get impact object type
-                        impact_object_signature = impact_object_data.get(
-                            "mangling", ""
-                        )  # Get impact object signature
-                        impact_object_source_location = impact_object_data["sourceLocations"][
-                            0
-                        ]  # Extract source location
-                        impact_object_source_path = impact_object_source_location[
-                            "filePath"
-                        ]  # Get source file path
-                        impact_object_field_id = int(impact_object_source_location[
-                            "fileId"
-                        ])  # Get file ID
-                        impact_object_start_line = int(impact_object_source_location[
-                            "startLine"
-                        ])  # Get start line number
-                        impact_object_end_line = int(impact_object_source_location[
-                            "endLine"
-                        ])  # Get end line number
+                        impact_object_data = (impact_object_response.json())  # Parse impact object data
+                        impact_object_type = impact_object_data.get("typeId", "")  # Get impact object type
+                        impact_object_signature = impact_object_data.get("mangling", "")  # Get impact object signature
+                        impact_object_source_location = impact_object_data["sourceLocations"][0]  # Extract source location
+                        impact_object_source_path = impact_object_source_location["filePath"]  # Get source file path
+                        impact_object_field_id = int(impact_object_source_location["fileId"])  # Get file ID
+                        impact_object_start_line = int(impact_object_source_location["startLine"])  # Get start line number
+                        impact_object_end_line = int(impact_object_source_location["endLine"])  # Get end line number
 
                         impact_object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_field_id}?start-line={impact_object_start_line}&end-line={impact_object_end_line}"
-                        impact_object_code_response = requests.get(
-                            impact_object_code_url, params=params, verify=False
-                        )
+                        impact_object_code_response = requests.get(impact_object_code_url, params=params, verify=False)
 
                         # Check if the object code was fetched successfully
                         if impact_object_code_response.status_code == 200:
-                            impact_object_full_code = (
-                                impact_object_code_response.text
-                            )  # Get object code
+                            impact_object_full_code = (impact_object_code_response.text)  # Get object code
                         else:
                             impact_object_full_code = ""
-                            logging.error(
-                                f"Failed to fetch object code using {impact_object_code_url}. Status code: {impact_object_code_response.status_code}"
-                            )
+                            logging.error(f"Failed to fetch object code using {impact_object_code_url}. Status code: {impact_object_code_response.status_code}")
 
                     else:
                         impact_object_type = ""
                         impact_object_signature = ""
-                        logging.error(
-                            f"Failed to fetch impact object data using {impact_object_url}. Status code: {impact_object_response.status_code}"
-                        )
+                        logging.error(f"Failed to fetch impact object data using {impact_object_url}. Status code: {impact_object_response.status_code}")
 
-                    impact_object_link_type = impact_object.get(
-                        "linkType", ""
-                    )  # Get link type for impact object
+                    impact_object_link_type = impact_object.get("linkType", "")  # Get link type for impact object
 
                     # Handle bookmarks associated with the impact object
                     bookmarks = impact_object.get("bookmarks")
@@ -591,30 +530,20 @@ def gen_code_connected_json(
                         impact_object_bookmark_code = ""
                     else:
                         bookmark = bookmarks[0]
-                        impact_object_bookmark_field_id = bookmark.get(
-                            "fileId", ""
-                        )  # Get file ID from bookmark
+                        impact_object_bookmark_field_id = bookmark.get("fileId", "")  # Get file ID from bookmark
                         # Calculate start and end lines for impact object code
-                        impact_object_bookmark_start_line = max(
-                            int(bookmark.get("startLine", 1)) - 1, 0
-                        )
+                        impact_object_bookmark_start_line = max(int(bookmark.get("startLine", 1)) - 1, 0)
                         impact_object_bookmark_end_line = max(int(bookmark.get("endLine", 1)) - 1, 0)
                         # Construct URL to fetch impact object code
                         impact_object_bookmark_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_bookmark_field_id}?start-line={impact_object_bookmark_start_line}&end-line={impact_object_bookmark_end_line}"
-                        impact_object_bookmark_code_response = requests.get(
-                            impact_object_bookmark_code_url, params=params, verify=False
-                        )
+                        impact_object_bookmark_code_response = requests.get(impact_object_bookmark_code_url, params=params, verify=False)
 
                         # Check if the impact object code was fetched successfully
                         if impact_object_bookmark_code_response.status_code == 200:
-                            impact_object_bookmark_code = (
-                                impact_object_bookmark_code_response.text
-                            )  # Get impact object code
+                            impact_object_bookmark_code = (impact_object_bookmark_code_response.text)  # Get impact object code
                         else:
                             impact_object_bookmark_code = ""
-                            logging.error(
-                                f"Failed to fetch impact object code using {impact_object_bookmark_code_url}. Status code: {impact_object_bookmark_code_response.status_code}"
-                            )
+                            logging.error(f"Failed to fetch impact object code using {impact_object_bookmark_code_url}. Status code: {impact_object_bookmark_code_response.status_code}")
 
                     # Append the impact object data to the impacts DataFrame
                     new_impact_row = pd.DataFrame(
@@ -633,13 +562,9 @@ def gen_code_connected_json(
                     )
                     impacts = pd.concat([impacts, new_impact_row], ignore_index=True)
             else:
-                logging.error(
-                    f"Failed to fetch callers using {object_callers_url}. Status code: {object_callers_response.status_code}"
-                )
+                logging.error(f"Failed to fetch callers using {object_callers_url}. Status code: {object_callers_response.status_code}")
         else:
-            logging.error(
-                f"Failed to fetch object data using {object_url}. Status code: {object_response.status_code}"
-            )  # Skip to the next object if there is an error
+            logging.error(f"Failed to fetch object data using {object_url}. Status code: {object_response.status_code}")  # Skip to the next object if there is an error
 
         if not exceptions.empty:
             # Group exceptions by link type and aggregate unique exceptions
@@ -649,10 +574,7 @@ def gen_code_connected_json(
             exception_text = (
                 f"Take into account that {object_type} <{object_signature}>: "
                 + "; ".join(
-                    [
-                        f"{link_type} {', '.join(exc)}"
-                        for link_type, exc in grouped_exceptions.items()
-                    ]
+                    [ f"{link_type} {', '.join(exc)}" for link_type, exc in grouped_exceptions.items() ]
                 )
             )
             logging.info(f"exception_text = {exception_text}")
@@ -694,9 +616,7 @@ def gen_code_connected_json(
         )
 
         # Clean up prompt content for formatting issues
-        prompt_content = (
-            prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-        )
+        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
         logging.info(f"Prompt Content: {prompt_content}")
 
@@ -705,9 +625,7 @@ def gen_code_connected_json(
 
         # Count tokens for the AI model's input
         code_token = count_chatgpt_tokens(ai_model_name, str(obj_code))
-        prompt_token = count_chatgpt_tokens(
-            ai_model_name, "\n".join([json.dumps(m) for m in messages])
-        )
+        prompt_token = count_chatgpt_tokens(ai_model_name, "\n".join([json.dumps(m) for m in messages]))
 
         # Determine target response size
         target_response_size = int(code_token * 1.2 + 500)
@@ -777,18 +695,14 @@ def gen_code_connected_json(
                     content_info_dictionary["filefullname"] = file_fullname
                     content_info_dictionary["originalfilecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
 
-                if (
-                    content_info_dictionary["filefullname"]
-                    or content_info_dictionary["originalfilecontent"]
-                ):
+                if (content_info_dictionary["filefullname"] or content_info_dictionary["originalfilecontent"]):
                     engine_output["contentinfo"].append(content_info_dictionary)
 
-                if (
-                    response_content["signature_impact"].upper() == "YES"
+                if (response_content["signature_impact"].upper() == "YES"
                     or response_content["exception_impact"].upper() == "YES"
                     or response_content["enclosed_impact"].upper() == "YES"
-                    or response_content["other_impact"].upper() == "YES"
-                ):
+                    or response_content["other_impact"].upper() == "YES"):
+
                     if not impacts.empty:
                         for i, row in impacts.iterrows():
                             parent_info = f"""The {row['object_type']} <{row['object_signature']}> source code is the following:
@@ -813,9 +727,7 @@ def gen_code_connected_json(
                                 dep_object_file_content = dep_object_file_content_response.text  # Get object code
                             else:
                                 dep_object_file_content = ""
-                                logging.error(
-                                    f"Failed to fetch object code using {object_code_url}. Status code: {dep_object_file_content_response.status_code}"
-                                )            
+                                logging.error(f"Failed to fetch object code using {object_code_url}. Status code: {dep_object_file_content_response.status_code}")            
 
                             dep_object_file_content = dep_object_file_content.splitlines(keepends=True)
                             dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
@@ -838,10 +750,7 @@ def gen_code_connected_json(
 
                             engine_output["objects"].append(object_data)
 
-                            if (
-                                contentinfo_data["filefullname"]
-                                or contentinfo_data["originalfilecontent"]
-                            ):
+                            if (contentinfo_data["filefullname"] or contentinfo_data["originalfilecontent"]):
                                 engine_output["contentinfo"].append(contentinfo_data)
 
             else:
@@ -849,9 +758,7 @@ def gen_code_connected_json(
                 object_dictionary["message"] = response_content["comment"]
 
         else:
-            logging.warning(
-                "Prompt too long; skipping."
-            )  # Warn if the prompt exceeds limits
+            logging.warning("Prompt too long; skipping.")  # Warn if the prompt exceeds limits
 
             object_dictionary["status"] = "failure"
             object_dictionary["message"] = "failed because of reason: prompt too long"
@@ -874,8 +781,32 @@ def home():
     })
 
 
-@app.route("/api-python/v1/ProcessRequest/<string:Request_Id>")
-def process_request(Request_Id):
+# Global request queue
+request_queue = Queue()
+queue_status = {}
+
+# Worker function to process requests
+def request_worker():
+    while True:
+        Request_Id = request_queue.get()  # Fetch next request from the queue
+        if Request_Id is None:
+            break  # Exit the loop if a None signal is sent
+        
+        queue_status[Request_Id] = "Processing"
+        try:
+            # Call the original process_request logic here
+            response = process_request_logic(Request_Id)
+            queue_status[Request_Id] = "Completed"
+            print(f"Request {Request_Id} processed successfully.")
+        except Exception as e:
+            queue_status[Request_Id] = "Failed"
+            print(f"Error processing request {Request_Id}: {e}")
+        finally:
+            request_queue.task_done()  # Mark the task as done
+
+
+# Function containing the original processing logic (refactored for reuse)
+def process_request_logic(Request_Id):
     try:
 
         model_invocation_delay = 10
@@ -929,14 +860,18 @@ def process_request(Request_Id):
                     "createddate": timestamp,
                 }
 
+                files_content = {
+                    "requestid": RequestId,
+                    "updatedcontentinfo": [],
+                    "createddate": timestamp,
+                }
+
                 objects_status_list = []
 
                 for requestdetail in request["requestdetail"]:
                     prompt_id = requestdetail["promptid"]
 
-                    prompt_library_documents = prompt_library_collection.find(
-                        {"issueid": int(IssueID)}
-                    )
+                    prompt_library_documents = prompt_library_collection.find({"issueid": int(IssueID)})
 
                     for prompt_library_doc in prompt_library_documents:
 
@@ -997,45 +932,55 @@ def process_request(Request_Id):
                         unique_string = generate_unique_alphanumeric()
                         content["fileid"] = unique_string
 
-                        files_content_data = { "requestid": RequestId, "fileid":unique_string, "updatedfilecontent": modified_lines, "createddate":timestamp }
+                        file_path = content["filefullname"]
+                        files_content_data = { "fileid":unique_string, "filepath":file_path, "updatedfilecontent": modified_lines }
 
-                        res = files_content_collection.insert_one(files_content_data)
-                        print(f"Data inserted for file - {unique_string}")
+                        files_content["updatedcontentinfo"].append(files_content_data)
+
+                        # res = files_content_collection.insert_one(files_content_data)
+                        # print(f"Data inserted for file - {unique_string}")
 
                         # with open("original_file.txt", "w") as of:
                         #     of.writelines(lines)
                         # with open("modified_file.txt", "w") as mf:
                         #     mf.writelines(modified_lines)
 
-
                     # Check if data already exists
-                    existing_record = engine_output_collection.find_one(
-                        {"requestid": engine_output["requestid"]}
-                    )
+                    existing_record = engine_output_collection.find_one({"requestid": engine_output["requestid"]})
 
                     if existing_record:
                         # Delete the existing record
-                        engine_output_collection.delete_one(
-                            {"requestid": engine_output["requestid"]}
-                        )
-                        print(
-                            f"Existing requestid - {engine_output['requestid']} deleted."
-                        )
+                        engine_output_collection.delete_one({"requestid": engine_output["requestid"]})
+                        print(f"Existing requestid - {engine_output['requestid']} deleted in engine_output_collection.")
 
                     # Insert the new data
-                    result = engine_output_collection.insert_one(engine_output)
-                    print(f"Data inserted for requestid - {engine_output['requestid']}")
+                    engine_output_result = engine_output_collection.insert_one(engine_output)
+                    print(f"Data inserted into engine_output_collection for requestid - {engine_output['requestid']}")
 
+
+                    files_content_exist = files_content_collection.find_one({"requestid": files_content["requestid"]})
+
+                    if files_content_exist:
+                        # Delete the existing record
+                        files_content_collection.delete_one({"requestid": files_content["requestid"]})
+                        print(f"Existing requestid - {files_content['requestid']} deleted in files_content_collection.")
+                    
+                    # Insert the new data
+                    files_content_result = files_content_collection.insert_one(files_content)
+                    print(f"Data inserted into files_content_collection for requestid - {engine_output['requestid']}")
 
                 return ({
+                    "Request_Id": Request_Id,
                     "status": "success",
                     "message" : f"Req -> {Request_Id} Successful.",
                     "code": 200
                 })
             
             else:
-
+                print(f"Req -> {Request_Id} Not Found or Incorrect EngineInput!")
+                log_error_to_mongo(f"Req -> {Request_Id} Not Found or Incorrect EngineInput!", "process_request")
                 return ({
+                    "Request_Id": Request_Id,
                     "status": "failed",
                     "message" : f"Req -> {Request_Id} Not Found or Incorrect EngineInput!",
                     "code": 404
@@ -1046,10 +991,60 @@ def process_request(Request_Id):
         print(f"An error occurred: {e}")
         log_error_to_mongo(e, "process_request")
         return ({
+            "Request_Id": Request_Id,
             "status": "failed",
             "message" : f"Internal Server Error -> {e}",
             "code": 500
         })
+
+# Start the worker thread
+worker_thread = Thread(target=request_worker, daemon=True)
+worker_thread.start()
+
+@app.route("/api-python/v1/ProcessRequest/<string:Request_Id>")
+def process_request(Request_Id):
+    if queue_status.get(Request_Id) == "Processing":
+        return jsonify({
+            "Request_Id": Request_Id,
+            "status": "in_progress",
+            "message": f"Request {Request_Id} is already being processed.",
+            "code": 202
+        })
+    elif queue_status.get(Request_Id) == "Completed":
+        return jsonify({
+            "Request_Id": Request_Id,
+            "status": "completed",
+            "message": f"Request {Request_Id} has already been processed.",
+            "code": 200
+        })
+
+    # Add the request to the queue
+    queue_status[Request_Id] = "Queued"
+    request_queue.put(Request_Id)
+    return jsonify({
+        "Request_Id": Request_Id,
+        "status": "queued",
+        "message": f"Request {Request_Id} has been added to the processing queue.",
+        "code": 202
+    })
+
+@app.route("/api-python/v1/QueueStatus/<string:Request_Id>")
+def check_queue_status(Request_Id):
+    status = queue_status.get(Request_Id, "Not Found")
+    return jsonify({
+        "Request_Id": Request_Id,
+        "status": status
+    })
+
+# Graceful shutdown route to stop the worker thread
+@app.route("/api-python/v1/ShutdownQueue", methods=["POST"])
+def shutdown_queue():
+    request_queue.put(None)  # Send a signal to stop the worker thread
+    worker_thread.join()
+    return jsonify({
+        "status": "success",
+        "message": "Request queue has been shut down."
+    })
 
 
 if __name__ == "__main__":
