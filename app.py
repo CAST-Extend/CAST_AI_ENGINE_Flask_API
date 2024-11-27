@@ -374,7 +374,8 @@ def check_dependent_code_json(
                 object_dictionary["status"] = "success"
                 object_dictionary["message"] = response_content["comment"]
 
-                file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+                # file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+                file_fullname = object_source_path
 
                 file_flag = False
                 if len(engine_output["contentinfo"]) > 0:
@@ -677,12 +678,14 @@ def gen_code_connected_json(
                     )            
 
                 file_content = file_content.splitlines(keepends=True)
-                file_path = RepoName + object_source_path.split(RepoName)[-1]
+                # file_path = RepoName + object_source_path.split(RepoName)[-1]
+                file_path = object_source_path
 
                 object_dictionary["status"] = "success"
                 object_dictionary["message"] = response_content["comment"]
 
-                file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+                # file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+                file_fullname = object_source_path
 
                 file_flag = False
                 if len(engine_output["contentinfo"]) > 0:
@@ -730,7 +733,8 @@ def gen_code_connected_json(
                                 logging.error(f"Failed to fetch object code using {object_code_url}. Status code: {dep_object_file_content_response.status_code}")            
 
                             dep_object_file_content = dep_object_file_content.splitlines(keepends=True)
-                            dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
+                            # dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
+                            dep_object_file_path = object_source_path
 
                             object_data, contentinfo_data, engine_output = check_dependent_code_json(
                                 row["object_type"],
@@ -944,6 +948,14 @@ def process_request_logic(Request_Id):
                         #     of.writelines(lines)
                         # with open("modified_file.txt", "w") as mf:
                         #     mf.writelines(modified_lines)
+
+
+                    # Define the filter and update
+                    filter = {"request.requestid": f"{Request_Id}"}  # Match document with requestid
+                    update = {"$set": {"request.$[elem].status": f"{engine_output["status"] }"}}  # Update the status for the matched reques
+                    array_filters = [{"elem.requestid": f"{Request_Id}"}] # Specify array filters
+                    engine_input_status_update = engine_input_collection.update_one(filter, update, array_filters=array_filters) # Perform the update
+
 
                     # Check if data already exists
                     existing_record = engine_output_collection.find_one({"requestid": engine_output["requestid"]})
