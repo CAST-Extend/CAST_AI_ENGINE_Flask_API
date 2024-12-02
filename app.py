@@ -1,27 +1,23 @@
 import ast
-import stat
-import subprocess
-from flask import Flask, jsonify
-from flask_cors import CORS
-from config import Config
+import multiprocessing
 import re
-import shutil
 import time
-import os
 import requests
 import json
 import pandas as pd
 import logging
 import tiktoken
-from openai import AzureOpenAI
-from datetime import datetime
 import warnings
-from pymongo import MongoClient
 import secrets
 import string
 import traceback
+from datetime import datetime
+from pymongo import MongoClient
+from flask import Flask, jsonify
+from flask_cors import CORS
+from config import Config
 from queue import Queue
-from threading import Thread
+from threading import Thread, Lock
 
 
 from pymongo.errors import ServerSelectionTimeoutError, ConfigurationError
@@ -788,6 +784,7 @@ def home():
 # Global request queue
 request_queue = Queue()
 queue_status = {}
+queue_lock = Lock()
 
 # Worker function to process requests
 def request_worker():
@@ -796,18 +793,21 @@ def request_worker():
         if Request_Id is None:
             break  # Exit the loop if a None signal is sent
         
-        queue_status[Request_Id] = "Processing"
+        with queue_lock:
+            queue_status[Request_Id] = "Processing"
+        
         try:
             # Call the original process_request logic here
             response = process_request_logic(Request_Id)
-            queue_status[Request_Id] = "Completed"
-            print(f"Request {Request_Id} processed successfully.")
+            with queue_lock:
+                queue_status[Request_Id] = "Completed"
+            print(f"Request {Request_Id} processed successfully: {response}")
         except Exception as e:
-            queue_status[Request_Id] = "Failed"
+            with queue_lock:
+                queue_status[Request_Id] = "Failed"
             print(f"Error processing request {Request_Id}: {e}")
         finally:
             request_queue.task_done()  # Mark the task as done
-
 
 # Function containing the original processing logic (refactored for reuse)
 def process_request_logic(Request_Id):
@@ -936,7 +936,7 @@ def process_request_logic(Request_Id):
                         unique_string = generate_unique_alphanumeric()
                         content["fileid"] = unique_string
 
-                        file_path = content["filefullname"]
+                        file_path = content["filefullname"].replace('\\','/')
                         files_content_data = { "fileid":unique_string, "filepath":file_path, "updatedfilecontent": modified_lines }
 
                         files_content["updatedcontentinfo"].append(files_content_data)
@@ -1009,55 +1009,56 @@ def process_request_logic(Request_Id):
             "code": 500
         })
 
-# Start the worker thread
-worker_thread = Thread(target=request_worker, daemon=True)
-worker_thread.start()
+
+# Function to calculate the number of worker threads dynamically
+def get_optimal_workers():
+    cpu_count = multiprocessing.cpu_count()  # Get the number of CPU cores
+    # You can use a multiplier to adjust the number of threads (e.g., 2x CPU cores)
+    return min(2 * cpu_count, 20)  # Limit to a maximum of 20 workers to avoid excessive threads
+
+
+# Start multiple worker threads
+worker_threads = []
+NUM_WORKERS = get_optimal_workers()  # Dynamically determine the number of workers
+for _ in range(NUM_WORKERS):
+    worker_thread = Thread(target=request_worker, daemon=True)
+    worker_thread.start()
+    worker_threads.append(worker_thread)
 
 @app.route("/api-python/v1/ProcessRequest/<string:Request_Id>")
 def process_request(Request_Id):
-    if queue_status.get(Request_Id) == "Processing":
+    with queue_lock:
+        if queue_status.get(Request_Id) == "Processing":
+            return jsonify({
+                "Request_Id": Request_Id,
+                "status": "in_progress",
+                "message": f"Request {Request_Id} is already being processed.",
+                "code": 202
+            })
+        elif queue_status.get(Request_Id) == "Completed":
+            return jsonify({
+                "Request_Id": Request_Id,
+                "status": "completed",
+                "message": f"Request {Request_Id} has already been processed.",
+                "code": 200
+            })
+        elif queue_status.get(Request_Id) == "Failed":
+            return jsonify({
+                "Request_Id": Request_Id,
+                "status": "failed",
+                "message": f"Request {Request_Id} failed during processing.",
+                "code": 500
+            })
+
+        # Add the request to the queue
+        queue_status[Request_Id] = "Queued"
+        request_queue.put(Request_Id)
         return jsonify({
             "Request_Id": Request_Id,
-            "status": "in_progress",
-            "message": f"Request {Request_Id} is already being processed.",
+            "status": "queued",
+            "message": f"Request {Request_Id} has been added to the processing queue.",
             "code": 202
         })
-    elif queue_status.get(Request_Id) == "Completed":
-        return jsonify({
-            "Request_Id": Request_Id,
-            "status": "completed",
-            "message": f"Request {Request_Id} has already been processed.",
-            "code": 200
-        })
-
-    # Add the request to the queue
-    queue_status[Request_Id] = "Queued"
-    request_queue.put(Request_Id)
-    return jsonify({
-        "Request_Id": Request_Id,
-        "status": "queued",
-        "message": f"Request {Request_Id} has been added to the processing queue.",
-        "code": 202
-    })
-
-@app.route("/api-python/v1/QueueStatus/<string:Request_Id>")
-def check_queue_status(Request_Id):
-    status = queue_status.get(Request_Id, "Not Found")
-    return jsonify({
-        "Request_Id": Request_Id,
-        "status": status
-    })
-
-# Graceful shutdown route to stop the worker thread
-@app.route("/api-python/v1/ShutdownQueue", methods=["POST"])
-def shutdown_queue():
-    request_queue.put(None)  # Send a signal to stop the worker thread
-    worker_thread.join()
-    return jsonify({
-        "status": "success",
-        "message": "Request queue has been shut down."
-    })
-
 
 if __name__ == "__main__":
     app.run(debug=False, host='0.0.0.0', port=8081)
