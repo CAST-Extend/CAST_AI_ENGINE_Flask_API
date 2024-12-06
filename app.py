@@ -225,6 +225,7 @@ def ask_ai_model(
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
         log_error_to_mongo(e, "ask_ai_model")
+        return None
 
 
 def count_chatgpt_tokens(ai_model_name, prompt):
@@ -402,6 +403,7 @@ def check_dependent_code_json(
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
         log_error_to_mongo(e, "check_dependent_code_json")
+        return object_dictionary, content_info_dictionary, engine_output
 
 
 def gen_code_connected_json(
@@ -770,6 +772,7 @@ def gen_code_connected_json(
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
         log_error_to_mongo(e, "gen_code_connected_json")
+        return engine_output
 
 
 @app.route("/api-python/v1/")
@@ -886,6 +889,8 @@ def process_request_logic(Request_Id):
                                     for objectdetail in requestdetail["objectdetails"]:
                                         ObjectID = objectdetail["objectid"]
 
+                                        print(f"processing objectID - {ObjectID}.........")
+
                                         # Call the gen_code_connected_json function to process the request and generate code updates
                                         engine_output = gen_code_connected_json(
                                             ApplicationName,
@@ -906,6 +911,8 @@ def process_request_logic(Request_Id):
                                             json_resp,
                                             engine_output
                                         )
+
+                                        print(f"processed objectID - {ObjectID}.")
 
 
                     for object in engine_output['objects']:
