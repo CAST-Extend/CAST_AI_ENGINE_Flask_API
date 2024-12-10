@@ -449,6 +449,14 @@ def gen_code_connected_json(
             object_type = object_data["typeId"]  # Get object type
             object_signature = object_data["mangling"]  # Get object signature
             object_technology = object_data["programmingLanguage"]["name"]  # Get programming language
+
+            if object_data["sourceLocations"] == None:
+                object_dictionary["status"] = "failure"
+                object_dictionary["message"] = f"failed because of reason: sourceLocations not available for this object from Imaging API -> {object_url}"
+                print(object_dictionary["message"])
+                engine_output["objects"].append(object_dictionary)
+                return engine_output
+
             source_location = object_data["sourceLocations"][0]  # Extract source location
             object_source_path = source_location["filePath"]  # Get source file path
             object_field_id = source_location["fileId"]  # Get file ID
