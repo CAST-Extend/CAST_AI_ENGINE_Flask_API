@@ -44,6 +44,9 @@ imaging_api_key = app.config["IMAGING_API_KEY"]
 
 mongo_uri = app.config["MONGODB_CONNECTION_STRING"]
 
+max_threads = app.config["MAX_THREADS"]
+model_invocation_delay = app.config["MODEL_INVOCATION_DELAY_IN_SECONDS"]
+
 # # Get the current datetime
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -840,7 +843,7 @@ def request_worker():
 def process_request_logic(Request_Id):
     try:
 
-        model_invocation_delay = 10
+        # model_invocation_delay = 10
 
         json_resp = """
         {
@@ -1044,13 +1047,15 @@ def process_request_logic(Request_Id):
 # Function to calculate the number of worker threads dynamically
 def get_optimal_workers():
     cpu_count = multiprocessing.cpu_count()  # Get the number of CPU cores
+    print(f"Total number of CPU Cores - {cpu_count}")
     # You can use a multiplier to adjust the number of threads (e.g., 2x CPU cores)
-    return min(2 * cpu_count, 20)  # Limit to a maximum of 20 workers to avoid excessive threads
+    return cpu_count, min(2 * cpu_count, max_threads)  # Limit to a maximum of workers to avoid excessive threads
 
 
 # Start multiple worker threads
 worker_threads = []
-NUM_WORKERS = get_optimal_workers()  # Dynamically determine the number of workers
+cpu_count, NUM_WORKERS = get_optimal_workers()  # Dynamically determine the number of workers
+print(f"Total number of threads created - {NUM_WORKERS}")
 for _ in range(NUM_WORKERS):
     worker_thread = Thread(target=request_worker, daemon=True)
     worker_thread.start()
@@ -1064,21 +1069,27 @@ def process_request(Request_Id):
                 "Request_Id": Request_Id,
                 "status": "in_progress",
                 "message": f"Request {Request_Id} is already being processed.",
-                "code": 202
+                "code": 202,
+                "num_of_cpu": cpu_count,
+                "num_of_threads_created": NUM_WORKERS
             })
         elif queue_status.get(Request_Id) == "Completed":
             return jsonify({
                 "Request_Id": Request_Id,
                 "status": "completed",
                 "message": f"Request {Request_Id} has already been processed.",
-                "code": 200
+                "code": 200,
+                "num_of_cpu": cpu_count,
+                "num_of_threads_created": NUM_WORKERS
             })
         elif queue_status.get(Request_Id) == "Failed":
             return jsonify({
                 "Request_Id": Request_Id,
                 "status": "failed",
                 "message": f"Request {Request_Id} failed during processing.",
-                "code": 500
+                "code": 500,
+                "num_of_cpu": cpu_count,
+                "num_of_threads_created": NUM_WORKERS
             })
 
         # Add the request to the queue
@@ -1088,7 +1099,10 @@ def process_request(Request_Id):
             "Request_Id": Request_Id,
             "status": "queued",
             "message": f"Request {Request_Id} has been added to the processing queue.",
-            "code": 202
+            "code": 202,
+            "num_of_cpu": cpu_count,
+            "num_of_threads_created": NUM_WORKERS
+
         })
 
 if __name__ == "__main__":
