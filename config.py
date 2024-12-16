@@ -10,6 +10,7 @@ class Config:
     IMAGING_API_KEY = ''
 
     MONGODB_CONNECTION_STRING = ''
-
     
-
+    MAX_THREADS = 20
+    MODEL_INVOCATION_DELAY_IN_SECONDS = 10
+    
