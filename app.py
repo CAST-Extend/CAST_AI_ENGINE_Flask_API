@@ -342,7 +342,8 @@ def check_dependent_code_json(
         result = []
 
         # Check if the prompt length is within acceptable limits
-        if prompt_token < (ai_model_max_tokens - target_response_size):
+        # if prompt_token < (ai_model_max_tokens - target_response_size):
+        if True:
             # Ask the AI model for a response
             response_content = ask_ai_model(
                 prompt_content,
@@ -456,6 +457,13 @@ def gen_code_connected_json(
                 print(object_dictionary["message"])
                 engine_output["objects"].append(object_dictionary)
                 return engine_output
+            
+            if object_data["external"] == "true":
+                object_dictionary["status"] = "failure"
+                object_dictionary["message"] = f"failed because of reason: It is an external object and it does not contains sourceLocations."
+                print(object_dictionary["message"])
+                engine_output["objects"].append(object_dictionary)
+                return engine_output
 
             source_location = object_data["sourceLocations"][0]  # Extract source location
             object_source_path = source_location["filePath"]  # Get source file path
@@ -513,6 +521,13 @@ def gen_code_connected_json(
                         impact_object_field_id = int(impact_object_source_location["fileId"])  # Get file ID
                         impact_object_start_line = int(impact_object_source_location["startLine"])  # Get start line number
                         impact_object_end_line = int(impact_object_source_location["endLine"])  # Get end line number
+
+                        if impact_object_data["external"] == "true":
+                            object_dictionary["status"] = "failure"
+                            object_dictionary["message"] = f"failed because of reason: It is an external object and it does not contains sourceLocations."
+                            print(object_dictionary["message"])
+                            engine_output["objects"].append(object_dictionary)
+                            return engine_output
 
                         impact_object_code_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{impact_object_field_id}?start-line={impact_object_start_line}&end-line={impact_object_end_line}"
                         impact_object_code_response = requests.get(impact_object_code_url, params=params, verify=False)
@@ -640,7 +655,8 @@ def gen_code_connected_json(
         result = []
 
         # Check if the prompt length is within acceptable limits
-        if prompt_token < (ai_model_max_tokens - target_response_size):
+        # if prompt_token < (ai_model_max_tokens - target_response_size):
+        if True:
             # Ask the AI model for a response
             response_content = ask_ai_model(
                 prompt_content,
