@@ -77,7 +77,7 @@ def log_error_to_mongo(exception, function_name):
         "timestamp": timestamp,
     }
     collection.insert_one(error_data)
-    logging.error(f"Error logged to MongoDB: {error_data}")
+    logging.error(f"Error logged to MongoDB: {error_data}\n")
 
 
 def generate_unique_alphanumeric(length=24):
@@ -174,7 +174,7 @@ def ask_ai_model(
                     response_json = json.loads(response_content)
                     ai_response = response_json["choices"][0]["message"]["content"]
                     ai_response = json.loads(ai_response)  # Successfully parsed JSON, return it.
-                    return ai_response
+                    return ai_response, "success"
                 except json.JSONDecodeError as e:
                     # Log the JSON parsing error and prepare for retry if needed.
                     logging.error(f"JSON decoding failed on attempt {attempt}: {e}")
@@ -198,7 +198,7 @@ def ask_ai_model(
                     else:
                         # If max retries reached, log an error and return None.
                         logging.error("Max retries reached. Failed to obtain valid JSON from AI.")
-                        return None
+                        return None, "Max retries reached! Failed to obtain valid JSON from AI. Please Resend the request..."
 
             except Exception as e:
                 # Log any general errors during the request, and retry if possible.
@@ -220,15 +220,15 @@ def ask_ai_model(
 
                 else:
                     # If max retries reached due to persistent errors, log and return None.
-                    logging.error("Max retries reached due to persistent errors.")
-                    return None
+                    logging.error("Max retries reached due to persistent errors! Please Resend the request...")
+                    return None, "Max retries reached due to persistent errors! Please Resend the request..."
 
-        return None  # Return None if all attempts fail.
+        return None, "AI Model failed to fix the code. Please Resend the request..."  # Return None if all attempts fail.
     except Exception as e:
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
         log_error_to_mongo(e, "ask_ai_model")
-        return None
+        return None,  f"{e}. Please Resend the request..."
 
 
 def count_chatgpt_tokens(ai_model_name, prompt):
@@ -348,7 +348,7 @@ def check_dependent_code_json(
         # if prompt_token < (ai_model_max_tokens - target_response_size):
         if True:
             # Ask the AI model for a response
-            response_content = ask_ai_model(
+            response_content, ai_msg = ask_ai_model(
                 prompt_content,
                 json_dep_resp,
                 ai_model_url,
@@ -360,41 +360,49 @@ def check_dependent_code_json(
             logging.info(f"Response Content: {response_content}")
             time.sleep(model_invocation_delay)  # Delay for model invocation
 
-            # Check if the response indicates an update was made
-            if response_content["updated"].lower() == "yes":
+            if response_content == None:
+                object_dictionary["status"] = "failure"
+                object_dictionary["message"] = ai_msg
 
-                comment_str = "//"
-                comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
-
-                new_code = response_content["code"]  # Extract new code from the response
-                # Convert the new_code string back to its readable format
-                readable_code = (new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
-                start_line = int(dep_object_start_line)
-                end_line = int(dep_object_end_line)
-
-                object_dictionary["status"] = "success"
-                object_dictionary["message"] = response_content["comment"]
-
-                # file_fullname = RepoName + object_source_path.split(RepoName)[-1]
-                file_fullname = object_source_path
-
-                file_flag = False
-                if len(engine_output["contentinfo"]) > 0:
-                    for file in engine_output["contentinfo"]:
-                        if file["filefullname"] == file_fullname:
-                            file_flag = True
-                            engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
-
-                if not file_flag:
-                    content_info_dictionary["filefullname"] = file_fullname
-                    content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
+                # Append the response to the result list
+                return object_dictionary, content_info_dictionary, engine_output
 
             else:
-                object_dictionary["status"] = "failure"
-                object_dictionary["message"] = response_content["comment"]
+                # Check if the response indicates an update was made
+                if response_content["updated"].lower() == "yes":
 
-            # Append the response to the result list
-            return object_dictionary, content_info_dictionary, engine_output
+                    comment_str = "//"
+                    comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
+
+                    new_code = response_content["code"]  # Extract new code from the response
+                    # Convert the new_code string back to its readable format
+                    readable_code = (new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+                    start_line = int(dep_object_start_line)
+                    end_line = int(dep_object_end_line)
+
+                    object_dictionary["status"] = "success"
+                    object_dictionary["message"] = response_content["comment"]
+
+                    # file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+                    file_fullname = object_source_path
+
+                    file_flag = False
+                    if len(engine_output["contentinfo"]) > 0:
+                        for file in engine_output["contentinfo"]:
+                            if file["filefullname"] == file_fullname:
+                                file_flag = True
+                                engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+
+                    if not file_flag:
+                        content_info_dictionary["filefullname"] = file_fullname
+                        content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
+
+                else:
+                    object_dictionary["status"] = "failure"
+                    object_dictionary["message"] = response_content["comment"]
+
+                # Append the response to the result list
+                return object_dictionary, content_info_dictionary, engine_output
 
         else:
             logging.warning("Prompt too long; skipping.")  # Warn if the prompt exceeds limits
@@ -661,7 +669,7 @@ def gen_code_connected_json(
         # if prompt_token < (ai_model_max_tokens - target_response_size):
         if True:
             # Ask the AI model for a response
-            response_content = ask_ai_model(
+            response_content, ai_msg = ask_ai_model(
                 prompt_content,
                 json_resp,
                 ai_model_url,
@@ -673,118 +681,123 @@ def gen_code_connected_json(
             logging.info(f"Response Content: {response_content}")
             time.sleep(model_invocation_delay)  # Delay for model invocation
 
-            # Check if the response indicates an update was made
-            if response_content["updated"].lower() == "yes":
-
-                comment_str = "//"
-                comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
-
-                new_code = response_content["code"]  # Extract new code from the response
-                # Convert the new_code string back to its readable format
-
-                readable_code = new_code
-                # readable_code = (
-                #     new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
-                # )
-                start_line = object_start_line
-                end_line = object_end_line
-
-                # Construct URL to fetch object code
-                file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{object_field_id}"
-                file_content_response = requests.get(file_content_url, params=params, verify=False)
-
-                # Check if the object code was fetched successfully
-                if file_content_response.status_code == 200:
-                    file_content = file_content_response.text  # Get object code
-                else:
-                    file_content = ""
-                    logging.error(
-                        f"Failed to fetch object code using {object_code_url}. Status code: {file_content_response.status_code}"
-                    )            
-
-                file_content = file_content.splitlines(keepends=True)
-                # file_path = RepoName + object_source_path.split(RepoName)[-1]
-                file_path = object_source_path
-
-                object_dictionary["status"] = "success"
-                object_dictionary["message"] = response_content["comment"]
-
-                # file_fullname = RepoName + object_source_path.split(RepoName)[-1]
-                file_fullname = object_source_path
-
-                file_flag = False
-                if len(engine_output["contentinfo"]) > 0:
-                    for file in engine_output["contentinfo"]:
-                        if file["filefullname"] == file_fullname:
-                            file_flag = True
-                            engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
-
-                if not file_flag:
-                    content_info_dictionary["filefullname"] = file_fullname
-                    content_info_dictionary["originalfilecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
-
-                if (content_info_dictionary["filefullname"] or content_info_dictionary["originalfilecontent"]):
-                    engine_output["contentinfo"].append(content_info_dictionary)
-
-                if (response_content["signature_impact"].upper() == "YES"
-                    or response_content["exception_impact"].upper() == "YES"
-                    or response_content["enclosed_impact"].upper() == "YES"
-                    or response_content["other_impact"].upper() == "YES"):
-
-                    if not impacts.empty:
-                        for i, row in impacts.iterrows():
-                            parent_info = f"""The {row['object_type']} <{row['object_signature']}> source code is the following:
-                                            ```
-                                            {row['object_full_code']}
-                                            ```
-                                            This source code is defined in the {object_type} <{file_path}>.
-                                            The {object_type} <{file_path}> was updated by an AI the following way: [{response_content['comment']}].
-                                            The AI predicted the following impacts on related code:
-                                            * on signature: {response_content['signature_impact']}
-                                            * on exceptions: {response_content['exception_impact']}
-                                            * on enclosed objects: {response_content['enclosed_impact']}
-                                            * other: {response_content['other_impact']}
-                                            for the following reason: [{response_content['comment'] if response_content['impact_comment'] == 'NA' else response_content['impact_comment']}]."""
-                            
-                            # Construct URL to fetch object code
-                            dep_object_file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{int(row["object_file_id"])}"
-                            dep_object_file_content_response = requests.get(dep_object_file_content_url, params=params, verify=False)
-
-                            # Check if the object code was fetched successfully
-                            if dep_object_file_content_response.status_code == 200:
-                                dep_object_file_content = dep_object_file_content_response.text  # Get object code
-                            else:
-                                dep_object_file_content = ""
-                                logging.error(f"Failed to fetch object code using {object_code_url}. Status code: {dep_object_file_content_response.status_code}")            
-
-                            dep_object_file_content = dep_object_file_content.splitlines(keepends=True)
-                            # dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
-                            dep_object_file_path = object_source_path
-
-                            object_data, contentinfo_data, engine_output = check_dependent_code_json(
-                                row["object_type"],
-                                row["object_signature"],
-                                row["object_full_code"],
-                                parent_info,
-                                model_invocation_delay,
-                                row["object_start_line"],
-                                row["object_end_line"],
-                                row["object_id"],
-                                row["object_source_path"],
-                                RepoName,
-                                dep_object_file_content,
-                                dep_object_file_path,
-                                engine_output
-                            )
-
-                            engine_output["objects"].append(object_data)
-
-                            if (contentinfo_data["filefullname"] or contentinfo_data["originalfilecontent"]):
-                                engine_output["contentinfo"].append(contentinfo_data)
+            if response_content == None:
+                object_dictionary["status"] = "failure"
+                object_dictionary["message"] = ai_msg
 
             else:
-                object_dictionary["status"] = "failure"
-                object_dictionary["message"] = response_content["comment"]
+                # Check if the response indicates an update was made
+                if response_content["updated"].lower() == "yes":
+
+                    comment_str = "//"
+                    comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
+
+                    new_code = response_content["code"]  # Extract new code from the response
+                    # Convert the new_code string back to its readable format
+
+                    readable_code = new_code
+                    # readable_code = (
+                    #     new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+                    # )
+                    start_line = object_start_line
+                    end_line = object_end_line
+
+                    # Construct URL to fetch object code
+                    file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{object_field_id}"
+                    file_content_response = requests.get(file_content_url, params=params, verify=False)
+
+                    # Check if the object code was fetched successfully
+                    if file_content_response.status_code == 200:
+                        file_content = file_content_response.text  # Get object code
+                    else:
+                        file_content = ""
+                        logging.error(
+                            f"Failed to fetch object code using {object_code_url}. Status code: {file_content_response.status_code}"
+                        )            
+
+                    file_content = file_content.splitlines(keepends=True)
+                    # file_path = RepoName + object_source_path.split(RepoName)[-1]
+                    file_path = object_source_path
+
+                    object_dictionary["status"] = "success"
+                    object_dictionary["message"] = response_content["comment"]
+
+                    # file_fullname = RepoName + object_source_path.split(RepoName)[-1]
+                    file_fullname = object_source_path
+
+                    file_flag = False
+                    if len(engine_output["contentinfo"]) > 0:
+                        for file in engine_output["contentinfo"]:
+                            if file["filefullname"] == file_fullname:
+                                file_flag = True
+                                engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+
+                    if not file_flag:
+                        content_info_dictionary["filefullname"] = file_fullname
+                        content_info_dictionary["originalfilecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
+
+                    if (content_info_dictionary["filefullname"] or content_info_dictionary["originalfilecontent"]):
+                        engine_output["contentinfo"].append(content_info_dictionary)
+
+                    if (response_content["signature_impact"].upper() == "YES"
+                        or response_content["exception_impact"].upper() == "YES"
+                        or response_content["enclosed_impact"].upper() == "YES"
+                        or response_content["other_impact"].upper() == "YES"):
+
+                        if not impacts.empty:
+                            for i, row in impacts.iterrows():
+                                parent_info = f"""The {row['object_type']} <{row['object_signature']}> source code is the following:
+                                                ```
+                                                {row['object_full_code']}
+                                                ```
+                                                This source code is defined in the {object_type} <{file_path}>.
+                                                The {object_type} <{file_path}> was updated by an AI the following way: [{response_content['comment']}].
+                                                The AI predicted the following impacts on related code:
+                                                * on signature: {response_content['signature_impact']}
+                                                * on exceptions: {response_content['exception_impact']}
+                                                * on enclosed objects: {response_content['enclosed_impact']}
+                                                * other: {response_content['other_impact']}
+                                                for the following reason: [{response_content['comment'] if response_content['impact_comment'] == 'NA' else response_content['impact_comment']}]."""
+                                
+                                # Construct URL to fetch object code
+                                dep_object_file_content_url = f"{imaging_url}rest/tenants/{TenantName}/applications/{ApplicationName}/files/{int(row["object_file_id"])}"
+                                dep_object_file_content_response = requests.get(dep_object_file_content_url, params=params, verify=False)
+
+                                # Check if the object code was fetched successfully
+                                if dep_object_file_content_response.status_code == 200:
+                                    dep_object_file_content = dep_object_file_content_response.text  # Get object code
+                                else:
+                                    dep_object_file_content = ""
+                                    logging.error(f"Failed to fetch object code using {object_code_url}. Status code: {dep_object_file_content_response.status_code}")            
+
+                                dep_object_file_content = dep_object_file_content.splitlines(keepends=True)
+                                # dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
+                                dep_object_file_path = object_source_path
+
+                                object_data, contentinfo_data, engine_output = check_dependent_code_json(
+                                    row["object_type"],
+                                    row["object_signature"],
+                                    row["object_full_code"],
+                                    parent_info,
+                                    model_invocation_delay,
+                                    row["object_start_line"],
+                                    row["object_end_line"],
+                                    row["object_id"],
+                                    row["object_source_path"],
+                                    RepoName,
+                                    dep_object_file_content,
+                                    dep_object_file_path,
+                                    engine_output
+                                )
+
+                                engine_output["objects"].append(object_data)
+
+                                if (contentinfo_data["filefullname"] or contentinfo_data["originalfilecontent"]):
+                                    engine_output["contentinfo"].append(contentinfo_data)
+
+                else:
+                    object_dictionary["status"] = "failure"
+                    object_dictionary["message"] = response_content["comment"]
 
         else:
             logging.warning("Prompt too long; skipping.")  # Warn if the prompt exceeds limits
