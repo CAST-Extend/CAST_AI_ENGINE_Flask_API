@@ -844,8 +844,8 @@ def resend_fullfile_to_ai(full_code):
 
         logging.info(f"Prompt Content: {prompt_content}")
 
-        with open("prompt_content.txt", "w") as file:
-            file.write(prompt_content)
+        # with open("prompt_content.txt", "w") as file:
+        #     file.write(prompt_content)
 
         # Prepare messages for the AI model
         messages = [{"role": "user", "content": prompt_content}]
