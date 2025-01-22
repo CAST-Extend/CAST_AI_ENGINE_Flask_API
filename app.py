@@ -814,6 +814,78 @@ def gen_code_connected_json(
         log_error_to_mongo(e, "gen_code_connected_json")
         return engine_output
 
+def resend_fullfile_to_ai(full_code):
+    try:
+
+        json_resp = """
+        {
+        "updated":"<YES/NO to state if you updated the code or not (if you believe it did not need fixing)>",
+        "comment":"<explain here what you updated (or the reason why you did not update it)>",
+        "code":"<the fixed code goes here (or original code if the code was not updated)>"
+        }
+        """
+
+            # Construct the prompt for the AI model
+        prompt_content = (
+            "TASK:\n"
+            "1) fix syntax errors.\n"
+            "2) add missing packages.\n"
+            "3) add single line comments saying this is fixed by AI for the line which is changed.\n"
+            "4) do not remove already existing comments.\n"
+            f"'''\n{full_code}\n'''\n"  
+            "GUIDELINES:\n"
+            f"Use the following JSON structure to respond:\n'''\n{json_resp}\n'''\n"
+            "Make sure your response is a valid JSON string.\nRespond only the JSON string, and only the JSON string.\n"
+            "Do not enclose the JSON string in triple quotes, backslashes, ... Do not add comments outside of the JSON structure.\n"
+        )
+
+        # Clean up prompt content for formatting issues
+        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+
+        logging.info(f"Prompt Content: {prompt_content}")
+
+        with open("prompt_content.txt", "w") as file:
+            file.write(prompt_content)
+
+        # Prepare messages for the AI model
+        messages = [{"role": "user", "content": prompt_content}]
+
+        # Count tokens for the AI model's input
+        code_token = count_chatgpt_tokens(ai_model_name, str(full_code))
+        prompt_token = count_chatgpt_tokens(ai_model_name, "\n".join([json.dumps(m) for m in messages]))
+
+        # Determine target response size
+        target_response_size = int(code_token * 1.2 + 500)
+
+        result = []
+
+        # Check if the prompt length is within acceptable limits
+        if prompt_token < (ai_model_max_tokens - target_response_size):
+            # Ask the AI model for a response
+            response_content, ai_msg = ask_ai_model(
+                prompt_content,
+                json_resp,
+                ai_model_url,
+                ai_model_api_key,
+                ai_model_version,
+                ai_model_name,
+                max_tokens=target_response_size,
+            )
+            logging.info(f"Response Content: {response_content}")
+            time.sleep(model_invocation_delay)  # Delay for model invocation
+
+            if response_content == None:
+                return full_code
+
+            else:
+                # Check if the response indicates an update was made
+                return response_content["code"]
+
+    except Exception as e:
+        # Catch and print any errors that occur.
+        print(f"An error occurred: {e}")
+        log_error_to_mongo(e, "resend_fullfile_to_ai")
+
 
 @app.route("/api-python/v1/")
 def home():
@@ -978,6 +1050,8 @@ def process_request_logic(Request_Id):
                         modified_lines = replace_lines(lines, replacements)
 
                         modified_lines = "".join(modified_lines)
+
+                        modified_lines = resend_fullfile_to_ai(modified_lines)
                     
                         # Generate a unique 24-character alphanumeric string
                         unique_string = generate_unique_alphanumeric()
