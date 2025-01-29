@@ -120,7 +120,7 @@ def fix_common_json_issues(json_string):
 
 # Constants like MAX_RETRIES and RETRY_DELAY should be defined outside the function
 MAX_RETRIES = 3
-RETRY_DELAY = 2  # Delay in seconds between retries
+RETRY_DELAY = model_invocation_delay  # Delay in seconds between retries
 
 
 def ask_ai_model(
@@ -148,11 +148,18 @@ def ask_ai_model(
         Returns:
         dict or None: The JSON response from the AI model if valid, otherwise None.
         """
+        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+
+        # with open("prompt_content.txt", "w") as f:
+        #     f.write(prompt_content)
 
         messages = [{"role": "user", "content": prompt_content}]
 
         # Prepare the payload for the AI API
         payload = { "model": ai_model_name, "messages": messages, "temperature": 0 }
+
+        # with open("payload.json", "w") as f:
+        #     json.dump(payload, f, indent=4)
 
         # Set up headers for the API request
         headers = { "Authorization": f"Bearer {ai_model_api_key}", "Content-Type": "application/json" }
@@ -172,6 +179,10 @@ def ask_ai_model(
                 # Try to parse the AI response as JSON.
                 try:
                     response_json = json.loads(response_content)
+
+                    # with open("response.json", "w") as f:
+                    #     json.dump(response_json, f, indent=4)
+
                     ai_response = response_json["choices"][0]["message"]["content"]
                     ai_response = json.loads(ai_response)  # Successfully parsed JSON, return it.
                     return ai_response, "success"
@@ -185,11 +196,13 @@ def ask_ai_model(
                         time.sleep(RETRY_DELAY)
 
                         prompt_content = (
-                            f"The following text is not a valid JSON string:\n```\n{response_content}\n```\n"
-                            f"When trying to parse it with json.loads() in Python script, one gets the following error:\n```\n{e}\n```\n"
-                            f"It should match the following structure:\n```\n{json_resp}\n```\n"
+                            f"The following text is not a valid JSON string:\n```{ai_response}```\n"
+                            f"When trying to parse it with json.loads() in Python script, one gets the following error:\n```{e}```\n"
+                            f"It should match the following structure:\n```{json_resp}```\n"
                             "Make sure your response is a valid JSON string. Respond only with the JSON string."
                         )
+
+                        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
                         messages = [{"role": "user", "content": prompt_content}]
                         # Prepare the payload for the AI API
@@ -206,6 +219,8 @@ def ask_ai_model(
                 if attempt < MAX_RETRIES:
                     logging.info(f"Retrying AI request in {RETRY_DELAY} seconds...")
                     time.sleep(RETRY_DELAY)
+
+                    prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
                     prompt_content = (
                         f"The following text is not a valid JSON string:\n```\n{response_content}\n```\n"
@@ -314,19 +329,19 @@ def check_dependent_code_json(
         }"""
 
         # Construct the prompt for the AI model
-        prompt_content = f"""
-                        CONTEXT: {dep_object_type} <{dep_object_signature}> is dependent on code that was modified by an AI:
-                        {parent_info if parent_info else ''}
-                        TASK:
-                        Check and update if needed the following code:
-                        '''\n{dep_obj_code}\n'''
-                        GUIDELINES:
-                        Use the following JSON structure to respond:
-                        '''\n{json_dep_resp}\n'''
-                        Make sure your response is a valid JSON string.
-                        Respond only with the JSON string.
-                        """
-
+        prompt_content = (
+                        f"CONTEXT: {dep_object_type} <{dep_object_signature}> is dependent on code that was modified by an AI: \n"
+                        f"{parent_info if parent_info else ''} \n"
+                        f"TASK:\n"
+                        f"Check and update if needed the following code: \n"
+                        f"'''\n{dep_obj_code}\n'''"
+                        f"GUIDELINES: \n"
+                        f"Use the following JSON structure to respond: \n"
+                        f"'''\n{json_dep_resp}\n'''\n"
+                        f"\nMake sure your response is a valid JSON string.\nRespond only the JSON string, and only the JSON string. "
+                        f"Do not enclose the JSON string in triple quotes, backslashes, ... Do not add comments outside of the JSON structure.\n"
+        )
+        
         # Clean up prompt content for formatting issues
         prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
@@ -345,8 +360,8 @@ def check_dependent_code_json(
         result = []
 
         # Check if the prompt length is within acceptable limits
-        # if prompt_token < (ai_model_max_tokens - target_response_size):
-        if True:
+        if prompt_token < (ai_model_max_tokens - target_response_size):
+        # if True:
             # Ask the AI model for a response
             response_content, ai_msg = ask_ai_model(
                 prompt_content,
@@ -666,8 +681,8 @@ def gen_code_connected_json(
         result = []
 
         # Check if the prompt length is within acceptable limits
-        # if prompt_token < (ai_model_max_tokens - target_response_size):
-        if True:
+        if prompt_token < (ai_model_max_tokens - target_response_size):
+        # if True:
             # Ask the AI model for a response
             response_content, ai_msg = ask_ai_model(
                 prompt_content,
