@@ -1,10 +1,11 @@
 class Config:
 
-    MODEL_NAME = 'gpt-3.5-turbo'
+    MODEL_NAME = 'gpt-4o-mini'
     MODEL_VERSION = ''
     MODEL_URL = ''
     MODEL_API_KEY = ''
-    MODEL_MAX_TOKENS = 8192
+    MODEL_MAX_INPUT_TOKENS = 128000
+    MODEL_MAX_OUTPUT_TOKENS = 16384
 
     IMAGING_URL = ''
     IMAGING_API_KEY = ''

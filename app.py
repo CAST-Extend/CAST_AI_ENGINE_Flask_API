@@ -37,7 +37,8 @@ ai_model_name = app.config["MODEL_NAME"]
 ai_model_version = app.config["MODEL_VERSION"]
 ai_model_url = app.config["MODEL_URL"]
 ai_model_api_key = app.config["MODEL_API_KEY"]
-ai_model_max_tokens = app.config["MODEL_MAX_TOKENS"]
+ai_model_max_input_tokens = app.config["MODEL_MAX_INPUT_TOKENS"]
+ai_model_max_output_tokens = app.config["MODEL_MAX_OUTPUT_TOKENS"]
 
 imaging_url = app.config["IMAGING_URL"]
 imaging_api_key = app.config["IMAGING_API_KEY"]
@@ -131,6 +132,7 @@ def ask_ai_model(
     ai_model_version,
     ai_model_name,
     max_tokens,
+    ObjectID=None,
 ):
     try:
         """
@@ -150,8 +152,10 @@ def ask_ai_model(
         """
         prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
-        # with open("prompt_content.txt", "w") as f:
+        # with open(f"prompt_content_for_objectID_{ObjectID}.txt", "w") as f:
         #     f.write(prompt_content)
+        #     prompt_content_token = count_chatgpt_tokens(ai_model_name, str(prompt_content))
+        #     print("prompt content token: ",{prompt_content_token})
 
         messages = [{"role": "user", "content": prompt_content}]
 
@@ -180,8 +184,11 @@ def ask_ai_model(
                 try:
                     response_json = json.loads(response_content)
 
-                    # with open("response.json", "w") as f:
+                    # with open(f"AI_Response_for_ObjectID_{ObjectID}.json", "w") as f:
                     #     json.dump(response_json, f, indent=4)
+                    #     Ai_Response_content_token = count_chatgpt_tokens(ai_model_name, str(response_content))
+                    #     print("AI Response content token: ",{Ai_Response_content_token})
+
 
                     ai_response = response_json["choices"][0]["message"]["content"]
                     ai_response = json.loads(ai_response)  # Successfully parsed JSON, return it.
@@ -199,7 +206,8 @@ def ask_ai_model(
                             f"The following text is not a valid JSON string:\n```{ai_response}```\n"
                             f"When trying to parse it with json.loads() in Python script, one gets the following error:\n```{e}```\n"
                             f"It should match the following structure:\n```{json_resp}```\n"
-                            "Make sure your response is a valid JSON string. Respond only with the JSON string."
+                            f"\nMake sure your response is a valid JSON string.\nRespond only the JSON string, and only the JSON string. "
+                            f"Do not enclose the JSON string in triple quotes, backslashes, ... Do not add comments outside of the JSON structure.\n"
                         )
 
                         prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
@@ -215,28 +223,9 @@ def ask_ai_model(
 
             except Exception as e:
                 # Log any general errors during the request, and retry if possible.
-                logging.error(f"Error during AI model completion on attempt {attempt}: {e}")
-                if attempt < MAX_RETRIES:
-                    logging.info(f"Retrying AI request in {RETRY_DELAY} seconds...")
-                    time.sleep(RETRY_DELAY)
+                print(f"Error during AI model completion for the objectID-{ObjectID}:  {e}")
 
-                    prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
-
-                    prompt_content = (
-                        f"The following text is not a valid JSON string:\n```\n{response_content}\n```\n"
-                        f"When trying to parse it with json.loads() in Python script, one gets the following error:\n```\n{e}\n```\n"
-                        f"It should match the following structure:\n```\n{json_resp}\n```\n"
-                        "Make sure your response is a valid JSON string. Respond only with the JSON string."
-                    )
-
-                    messages = [{"role": "user", "content": prompt_content}]
-                    # Prepare the payload for the AI API
-                    payload = { "model": ai_model_name, "messages": messages, "temperature": 0 }
-
-                else:
-                    # If max retries reached due to persistent errors, log and return None.
-                    logging.error("Max retries reached due to persistent errors! Please Resend the request...")
-                    return None, "Max retries reached due to persistent errors! Please Resend the request..."
+                return None, f"{e}. Please Resend the request..."
 
         return None, "AI Model failed to fix the code. Please Resend the request..."  # Return None if all attempts fail.
     except Exception as e:
@@ -360,7 +349,7 @@ def check_dependent_code_json(
         result = []
 
         # Check if the prompt length is within acceptable limits
-        if prompt_token < (ai_model_max_tokens - target_response_size):
+        if prompt_token < (ai_model_max_input_tokens - target_response_size) and target_response_size < ai_model_max_output_tokens:
         # if True:
             # Ask the AI model for a response
             response_content, ai_msg = ask_ai_model(
@@ -370,7 +359,8 @@ def check_dependent_code_json(
                 ai_model_api_key,
                 ai_model_version,
                 ai_model_name,
-                max_tokens=target_response_size,
+                target_response_size,
+                dep_object_id,
             )
             logging.info(f"Response Content: {response_content}")
             time.sleep(model_invocation_delay)  # Delay for model invocation
@@ -445,7 +435,7 @@ def gen_code_connected_json(
     ai_model_version,
     ai_model_url,
     ai_model_api_key,
-    ai_model_max_tokens,
+    ai_model_max_input_tokens,
     imaging_url,
     imaging_api_key,
     model_invocation_delay,
@@ -459,7 +449,7 @@ def gen_code_connected_json(
 
         object_id = ObjectID
         logging.info("---------------------------------------------------------------------------------------------------------------------------------------")
-        logging.info(f"Processing object_id -> {object_id}.....")
+        logging.info(f"\n Processing object_id -> {object_id}.....")
 
         # Initialize DataFrames to store exceptions and impacts
         exceptions = pd.DataFrame(columns=["link_type", "exception"])
@@ -681,7 +671,7 @@ def gen_code_connected_json(
         result = []
 
         # Check if the prompt length is within acceptable limits
-        if prompt_token < (ai_model_max_tokens - target_response_size):
+        if prompt_token < (ai_model_max_input_tokens - target_response_size) and target_response_size < ai_model_max_output_tokens:
         # if True:
             # Ask the AI model for a response
             response_content, ai_msg = ask_ai_model(
@@ -691,7 +681,8 @@ def gen_code_connected_json(
                 ai_model_api_key,
                 ai_model_version,
                 ai_model_name,
-                max_tokens=target_response_size,
+                target_response_size,
+                ObjectID,
             )
             logging.info(f"Response Content: {response_content}")
             time.sleep(model_invocation_delay)  # Delay for model invocation
@@ -875,7 +866,7 @@ def resend_fullfile_to_ai(full_code):
         result = []
 
         # Check if the prompt length is within acceptable limits
-        if prompt_token < (ai_model_max_tokens - target_response_size):
+        if prompt_token < (ai_model_max_input_tokens - target_response_size) and target_response_size < ai_model_max_output_tokens:
             # Ask the AI model for a response
             response_content, ai_msg = ask_ai_model(
                 prompt_content,
@@ -895,6 +886,8 @@ def resend_fullfile_to_ai(full_code):
             else:
                 # Check if the response indicates an update was made
                 return response_content["code"]
+        else:
+            return full_code
 
     except Exception as e:
         # Catch and print any errors that occur.
@@ -1016,7 +1009,7 @@ def process_request_logic(Request_Id):
                                     for objectdetail in requestdetail["objectdetails"]:
                                         ObjectID = objectdetail["objectid"]
 
-                                        print(f"processing objectID - {ObjectID}.........")
+                                        print(f"\n processing objectID - {ObjectID}.........")
 
                                         # Call the gen_code_connected_json function to process the request and generate code updates
                                         engine_output = gen_code_connected_json(
@@ -1031,7 +1024,7 @@ def process_request_logic(Request_Id):
                                             ai_model_version,
                                             ai_model_url,
                                             ai_model_api_key,
-                                            ai_model_max_tokens,
+                                            ai_model_max_input_tokens,
                                             imaging_url,
                                             imaging_api_key,
                                             model_invocation_delay,
