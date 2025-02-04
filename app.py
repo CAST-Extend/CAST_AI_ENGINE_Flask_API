@@ -1066,6 +1066,10 @@ def process_request_logic(Request_Id):
                         content["fileid"] = unique_string
 
                         file_path = content["filefullname"].replace('\\','/')
+
+                        if RepoName in file_path:
+                            file_path = RepoName + file_path.split(RepoName)[-1]
+
                         files_content_data = { "fileid":unique_string, "filepath":file_path, "updatedfilecontent": modified_lines }
 
                         files_content["updatedcontentinfo"].append(files_content_data)
