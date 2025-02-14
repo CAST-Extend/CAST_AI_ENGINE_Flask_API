@@ -162,7 +162,7 @@ def ask_ai_model(
         # Prepare the payload for the AI API
         payload = { "model": ai_model_name, "messages": messages, "temperature": 0 }
 
-        # with open("payload.json", "w") as f:
+        # with open(f"payload_{ObjectID}.json", "w") as f:
         #     json.dump(payload, f, indent=4)
 
         # Set up headers for the API request
@@ -393,10 +393,10 @@ def check_dependent_code_json(
 
                     file_flag = False
                     if len(engine_output["contentinfo"]) > 0:
-                        for file in engine_output["contentinfo"]:
+                        for i, file in enumerate(engine_output["contentinfo"]):
                             if file["filefullname"] == file_fullname:
                                 file_flag = True
-                                engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+                                engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
 
                     if not file_flag:
                         content_info_dictionary["filefullname"] = file_fullname
@@ -733,10 +733,10 @@ def gen_code_connected_json(
 
                     file_flag = False
                     if len(engine_output["contentinfo"]) > 0:
-                        for file in engine_output["contentinfo"]:
+                        for i, file in enumerate(engine_output["contentinfo"]):
                             if file["filefullname"] == file_fullname:
                                 file_flag = True
-                                engine_output["contentinfo"][0]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+                                engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
 
                     if not file_flag:
                         content_info_dictionary["filefullname"] = file_fullname
@@ -835,8 +835,8 @@ def resend_fullfile_to_ai(full_code):
         prompt_content = (
             "TASK:\n"
             "1) fix syntax errors.\n"
-            "2) add missing packages.\n"
-            "3) add single line comments saying this is fixed by AI for the line which is changed.\n"
+            "2) add only missing packages.\n"
+            "3) add single line comments saying that this is fixed by AI for the lines only fixed by AI.\n"
             "4) do not remove already existing comments.\n"
             f"'''\n{full_code}\n'''\n"  
             "GUIDELINES:\n"
@@ -866,6 +866,7 @@ def resend_fullfile_to_ai(full_code):
         result = []
 
         # Check if the prompt length is within acceptable limits
+        # if True:
         if prompt_token < (ai_model_max_input_tokens - target_response_size) and target_response_size < ai_model_max_output_tokens:
             # Ask the AI model for a response
             response_content, ai_msg = ask_ai_model(
