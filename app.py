@@ -379,6 +379,8 @@ def check_dependent_code_json(
                     comment_str = "//"
                     comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
 
+                    end_comment = "\n// End of GEN AI fix"
+
                     new_code = response_content["code"]  # Extract new code from the response
                     # Convert the new_code string back to its readable format
                     readable_code = (new_code.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
@@ -396,11 +398,11 @@ def check_dependent_code_json(
                         for i, file in enumerate(engine_output["contentinfo"]):
                             if file["filefullname"] == file_fullname:
                                 file_flag = True
-                                engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+                                engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code + end_comment
 
                     if not file_flag:
                         content_info_dictionary["filefullname"] = file_fullname
-                        content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
+                        content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code + end_comment}]]
 
                 else:
                     object_dictionary["status"] = "failure"
@@ -698,6 +700,8 @@ def gen_code_connected_json(
                     comment_str = "//"
                     comment = f" {comment_str} This code is fixed by GEN AI \n {comment_str} AI update comment : {response_content['comment']} \n {comment_str} AI missing information : {response_content['missing_information']} \n {comment_str} AI signature impact : {response_content['signature_impact']} \n {comment_str} AI exception impact : {response_content['exception_impact']} \n {comment_str} AI enclosed code impact : {response_content['enclosed_impact']} \n {comment_str} AI other impact : {response_content['other_impact']} \n {comment_str} AI impact comment : {response_content['impact_comment']} \n"
 
+                    end_comment = "\n// End of GEN AI fix"
+
                     new_code = response_content["code"]  # Extract new code from the response
                     # Convert the new_code string back to its readable format
 
@@ -736,11 +740,11 @@ def gen_code_connected_json(
                         for i, file in enumerate(engine_output["contentinfo"]):
                             if file["filefullname"] == file_fullname:
                                 file_flag = True
-                                engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code
+                                engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code + end_comment
 
                     if not file_flag:
                         content_info_dictionary["filefullname"] = file_fullname
-                        content_info_dictionary["originalfilecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code}]]
+                        content_info_dictionary["originalfilecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code + end_comment}]]
 
                     if (content_info_dictionary["filefullname"] or content_info_dictionary["originalfilecontent"]):
                         engine_output["contentinfo"].append(content_info_dictionary)
@@ -836,8 +840,9 @@ def resend_fullfile_to_ai(full_code):
             "TASK:\n"
             "1) fix syntax errors.\n"
             "2) add only missing packages.\n"
-            "3) add single line comments saying that this is fixed by AI for the lines only fixed by AI.\n"
+            "3) add single line comments saying that this is fixed by Gen AI for the lines only fixed by Gen AI.\n"
             "4) do not remove already existing comments.\n"
+            "5) indent the code properly.\n"
             f"'''\n{full_code}\n'''\n"  
             "GUIDELINES:\n"
             f"Use the following JSON structure to respond:\n'''\n{json_resp}\n'''\n"
