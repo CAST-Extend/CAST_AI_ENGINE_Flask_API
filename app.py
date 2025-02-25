@@ -150,7 +150,9 @@ def ask_ai_model(
         Returns:
         dict or None: The JSON response from the AI model if valid, otherwise None.
         """
-        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+        # prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+
+        print(f"\n processing objectID - {ObjectID}.........")
 
         # with open(f"prompt_content_for_objectID_{ObjectID}.txt", "w") as f:
         #     f.write(prompt_content)
@@ -184,14 +186,17 @@ def ask_ai_model(
                 try:
                     response_json = json.loads(response_content)
 
+                    ai_response = response_json["choices"][0]["message"]["content"]
+
                     # with open(f"AI_Response_for_ObjectID_{ObjectID}.json", "w") as f:
-                    #     json.dump(response_json, f, indent=4)
+                    #     json.dump(ai_response, f, indent=4)
                     #     Ai_Response_content_token = count_chatgpt_tokens(ai_model_name, str(response_content))
                     #     print("AI Response content token: ",{Ai_Response_content_token})
 
-
-                    ai_response = response_json["choices"][0]["message"]["content"]
                     ai_response = json.loads(ai_response)  # Successfully parsed JSON, return it.
+
+                    print(f"processed objectID - {ObjectID}.")
+
                     return ai_response, "success"
                 except json.JSONDecodeError as e:
                     # Log the JSON parsing error and prepare for retry if needed.
@@ -210,7 +215,7 @@ def ask_ai_model(
                             f"Do not enclose the JSON string in triple quotes, backslashes, ... Do not add comments outside of the JSON structure.\n"
                         )
 
-                        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+                        # prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
                         messages = [{"role": "user", "content": prompt_content}]
                         # Prepare the payload for the AI API
@@ -286,6 +291,7 @@ def replace_lines(lines, replacements):
 
 
 def check_dependent_code_json(
+    ObjectID,
     dep_object_type,
     dep_object_signature,
     dep_obj_code,
@@ -301,7 +307,7 @@ def check_dependent_code_json(
     engine_output
 ):
     try:
-        object_dictionary = {"objectid": dep_object_id, "status": "", "message": ""}
+        object_dictionary = {"objectid": dep_object_id, "status": "", "message": "", "dependent_info":f"this object is depenedent on ObjectID-{ObjectID}"}
         content_info_dictionary = {"filefullname": "", "originalfilecontent": ""}
 
         json_dep_resp = """
@@ -332,7 +338,7 @@ def check_dependent_code_json(
         )
         
         # Clean up prompt content for formatting issues
-        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+        # prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
         logging.info(f"Prompt Content: {prompt_content}")
 
@@ -405,7 +411,7 @@ def check_dependent_code_json(
                         content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code + end_comment}]]
 
                 else:
-                    object_dictionary["status"] = "failure"
+                    object_dictionary["status"] = "unmodified"
                     object_dictionary["message"] = response_content["comment"]
 
                 # Append the response to the result list
@@ -656,7 +662,7 @@ def gen_code_connected_json(
         )
 
         # Clean up prompt content for formatting issues
-        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+        # prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
         logging.info(f"Prompt Content: {prompt_content}")
 
@@ -785,6 +791,7 @@ def gen_code_connected_json(
                                 dep_object_file_path = object_source_path
 
                                 object_data, contentinfo_data, engine_output = check_dependent_code_json(
+                                    ObjectID,
                                     row["object_type"],
                                     row["object_signature"],
                                     row["object_full_code"],
@@ -806,7 +813,7 @@ def gen_code_connected_json(
                                     engine_output["contentinfo"].append(contentinfo_data)
 
                 else:
-                    object_dictionary["status"] = "failure"
+                    object_dictionary["status"] = "unmodified"
                     object_dictionary["message"] = response_content["comment"]
 
         else:
@@ -851,7 +858,7 @@ def resend_fullfile_to_ai(full_code):
         )
 
         # Clean up prompt content for formatting issues
-        prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
+        # prompt_content = (prompt_content.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\"))
 
         logging.info(f"Prompt Content: {prompt_content}")
 
@@ -1015,8 +1022,6 @@ def process_request_logic(Request_Id):
                                     for objectdetail in requestdetail["objectdetails"]:
                                         ObjectID = objectdetail["objectid"]
 
-                                        print(f"\n processing objectID - {ObjectID}.........")
-
                                         # Call the gen_code_connected_json function to process the request and generate code updates
                                         engine_output = gen_code_connected_json(
                                             ApplicationName,
@@ -1038,18 +1043,17 @@ def process_request_logic(Request_Id):
                                             engine_output
                                         )
 
-                                        print(f"processed objectID - {ObjectID}.")
-
 
                     for object in engine_output['objects']:
                         objects_status_list.append(object['status'])
 
-                    if all(item == "success" for item in objects_status_list):
-                        engine_output["status"] = "success"
-                    elif all(item == "failure" for item in objects_status_list):
+
+                    if all(item == "failure" for item in objects_status_list):
                         engine_output["status"] = "failure"
-                    else:
+                    elif any(item == "failure" for item in objects_status_list):
                         engine_output["status"] = "partial success"
+                    else:
+                        engine_output["status"] = "success"
 
                     for content in engine_output["contentinfo"]:
                         lines = content["originalfilecontent"][0]
