@@ -1047,8 +1047,9 @@ def process_request_logic(Request_Id):
                     for object in engine_output['objects']:
                         objects_status_list.append(object['status'])
 
-
-                    if all(item == "failure" for item in objects_status_list):
+                    if all(item == "unmodified" for item in objects_status_list):
+                        engine_output["status"] = "unmodified"
+                    elif all(item == "failure" for item in objects_status_list):
                         engine_output["status"] = "failure"
                     elif any(item == "failure" for item in objects_status_list):
                         engine_output["status"] = "partial success"
