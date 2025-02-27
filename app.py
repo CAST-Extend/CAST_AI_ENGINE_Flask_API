@@ -411,7 +411,7 @@ def check_dependent_code_json(
                         content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code + end_comment}]]
 
                 else:
-                    object_dictionary["status"] = "unmodified"
+                    object_dictionary["status"] = "Unmodified"
                     object_dictionary["message"] = response_content["comment"]
 
                 # Append the response to the result list
@@ -813,7 +813,7 @@ def gen_code_connected_json(
                                     engine_output["contentinfo"].append(contentinfo_data)
 
                 else:
-                    object_dictionary["status"] = "unmodified"
+                    object_dictionary["status"] = "Unmodified"
                     object_dictionary["message"] = response_content["comment"]
 
         else:
@@ -1047,8 +1047,8 @@ def process_request_logic(Request_Id):
                     for object in engine_output['objects']:
                         objects_status_list.append(object['status'])
 
-                    if all(item == "unmodified" for item in objects_status_list):
-                        engine_output["status"] = "unmodified"
+                    if all(item == "Unmodified" for item in objects_status_list):
+                        engine_output["status"] = "Unmodified"
                     elif all(item == "failure" for item in objects_status_list):
                         engine_output["status"] = "failure"
                     elif any(item == "failure" for item in objects_status_list):
