@@ -1,6 +1,8 @@
+import pika
 import multiprocessing
 import requests
 import warnings
+import json
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -10,8 +12,7 @@ from app_logger import AppLogger
 from app_code_fixer import AppCodeFixer
 from app_mongo import AppMongoDb
 from config import Config
-from queue import Queue
-from threading import Thread, Lock
+from threading import Thread
 from requests.packages.urllib3.exceptions import InsecureRequestWarning # type: ignore
 
 # Suppress the InsecureRequestWarning
@@ -37,46 +38,99 @@ warnings.filterwarnings(
     message = "`clean_up_tokenization_spaces` was not set.*",
 )
 
-# ============ THREADS AND QUEUE MANAGEMENT ============
+# ============ RABBITMQ SETUP ============
 
-# Global request queue
-request_queue = Queue()
-queue_status = {}
-queue_lock = Lock()
+def get_rabbitmq_connection():
+    credentials = pika.PlainCredentials(
+        app.config.get("RABBITMQ_USER", "guest"),
+        app.config.get("RABBITMQ_PASSWORD", "guest")
+    )
+    parameters = pika.ConnectionParameters(
+        host=app.config.get("RABBITMQ_HOST", "localhost"),
+        port=app.config.get("RABBITMQ_PORT", 5672),
+        virtual_host=app.config.get("RABBITMQ_VHOST", "/"),
+        credentials=credentials,
+        heartbeat=600,
+        blocked_connection_timeout=300
+    )
+    return pika.BlockingConnection(parameters)
+
+def declare_queues(channel):
+    channel.queue_declare(queue='request_queue', durable=True)
+    channel.queue_declare(queue='status_queue', durable=True)
 
 # Worker function to process requests
 def request_worker():
-    while True:
-        request_id = request_queue.get()  # Fetch next request from the queue
-        if request_id is None:
-            # REM-DMA: should we call request_queue.task_done()?
-            break  # Exit the loop if a None signal is sent
-        
-        with queue_lock:
-            queue_status[request_id] = "Processing"
-        
+    connection = get_rabbitmq_connection()
+    channel = connection.channel()
+    declare_queues(channel)
+    
+    def callback(ch, method, properties, body):
         try:
-            # Call the original process_request logic here
+            request_id = body.decode()
+            print(f"Processing request {request_id}")
+            
+            # Update status to Processing
+            channel.basic_publish(
+                exchange='',
+                routing_key='status_queue',
+                body=json.dumps({
+                    'request_id': request_id,
+                    'status': 'Processing'
+                }),
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # make message persistent
+                ))
+            
+            # Process the request
             response = code_fixer.process_request_logic(request_id)
-            with queue_lock:
-                queue_status[request_id] = "Completed"
-            print(f"Request {request_id} processed successfully: {response}")
+            
+            # Update status based on result
+            status = 'Completed' if response.get('status') == 'success' else 'Failed'
+            channel.basic_publish(
+                exchange='',
+                routing_key='status_queue',
+                body=json.dumps({
+                    'request_id': request_id,
+                    'status': status,
+                    'response': response
+                }),
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # make message persistent
+                ))
+            
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            print(f"Request {request_id} processed successfully")
+            
         except Exception as e:
-            with queue_lock:
-                queue_status[request_id] = "Failed"
-            print(f"Error processing request {request_id}: {e}")
-        finally:
-            request_queue.task_done()  # Mark the task as done
+            print(f"Error processing request: {e}")
+            # Update status to Failed
+            channel.basic_publish(
+                exchange='',
+                routing_key='status_queue',
+                body=json.dumps({
+                    'request_id': request_id,
+                    'status': 'Failed',
+                    'error': str(e)
+                }),
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # make message persistent,
+                ))
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+    channel.basic_qos(prefetch_count=1)
+    channel.basic_consume(queue='request_queue', on_message_callback=callback)
+    print(' [*] Waiting for messages. To exit press CTRL+C')
+    channel.start_consuming()
 
 # Start multiple worker threads
 worker_threads = []
-
-cpu_count = multiprocessing.cpu_count()  # Get the number of CPU cores
-print(f"Total number of CPU Cores - {cpu_count}")
-# You can use a multiplier to adjust the number of threads (e.g., 2 x CPU cores)
-# Limit to a maximum of workers to avoid excessive threads (configurable)
+cpu_count = multiprocessing.cpu_count()
 NUM_WORKERS = min(2 * cpu_count, app.config["MAX_THREADS"])  
-print(f"Total number of threads created - {NUM_WORKERS}")
+
+print(f"Total number of CPU Cores - {cpu_count}")
+print(f"Total number of workers created - {NUM_WORKERS}")
+
 for _ in range(NUM_WORKERS):
     worker_thread = Thread(target=request_worker, daemon=True)
     worker_thread.start()
@@ -94,10 +148,7 @@ def home():
 @app.route("/api-python/v1/CheckMongoDBConnection")
 def check_mongodb_connection():
     try:
-        # Create a MongoClient object
         mongo_db = AppMongoDb(app.config)
-        
-        # Try to list collections to ensure the connection is working
         mongodb_collections = mongo_db.list_collections()
         
         return {
@@ -115,46 +166,71 @@ def check_mongodb_connection():
 
 @app.route("/api-python/v1/ProcessRequest/<string:Request_Id>")
 def process_request(Request_Id):
-    with queue_lock:
-        if queue_status.get(Request_Id) == "Processing":
-            return jsonify({
-                "Request_Id": Request_Id,
-                "status": "in_progress",
-                "message": f"Request {Request_Id} is already being processed.",
-                "code": 202,
-                "num_of_cpu": cpu_count,
-                "num_of_threads_created": NUM_WORKERS
-            })
-        elif queue_status.get(Request_Id) == "Completed":
-            return jsonify({
-                "Request_Id": Request_Id,
-                "status": "completed",
-                "message": f"Request {Request_Id} has already been processed.",
-                "code": 200,
-                "num_of_cpu": cpu_count,
-                "num_of_threads_created": NUM_WORKERS
-            }), 200
-        elif queue_status.get(Request_Id) == "Failed":
-            return jsonify({
-                "Request_Id": Request_Id,
-                "status": "failed",
-                "message": f"Request {Request_Id} failed during processing.",
-                "code": 500,
-                "num_of_cpu": cpu_count,
-                "num_of_threads_created": NUM_WORKERS
-            }), 500
-        else:
-            # Add the request to the queue
-            queue_status[Request_Id] = "Queued"
-            request_queue.put(Request_Id)
-            return jsonify({
-                "Request_Id": Request_Id,
-                "status": "queued",
-                "message": f"Request {Request_Id} has been added to the processing queue.",
-                "code": 202,
-                "num_of_cpu": cpu_count,
-                "num_of_threads_created": NUM_WORKERS
-            })
+    try:
+        connection = get_rabbitmq_connection()
+        channel = connection.channel()
+        declare_queues(channel)
+        
+        # Check current status
+        method_frame, header_frame, body = channel.basic_get(queue='status_queue', auto_ack=True)
+        
+        if method_frame:
+            status_message = json.loads(body)
+            if status_message['request_id'] == Request_Id:
+                status = status_message['status']
+                response_data = {
+                    "Request_Id": Request_Id,
+                    "status": status.lower(),
+                    "message": f"Request {Request_Id} is {status}",
+                    "code": 202 if status == 'Processing' else 200 if status == 'Completed' else 500,
+                    "num_of_cpu": cpu_count,
+                    "num_of_threads_created": NUM_WORKERS
+                }
+                if 'response' in status_message:
+                    response_data.update(status_message['response'])
+                return jsonify(response_data)
+        
+        # If not found in status queue, add to request queue
+        channel.basic_publish(
+            exchange='',
+            routing_key='request_queue',
+            body=Request_Id,
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # make message persistent
+            ))
+        
+        # Update status to Queued
+        channel.basic_publish(
+            exchange='',
+            routing_key='status_queue',
+            body=json.dumps({
+                'request_id': Request_Id,
+                'status': 'Queued'
+            }),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # make message persistent
+            ))
+        
+        connection.close()
+        
+        return jsonify({
+            "Request_Id": Request_Id,
+            "status": "queued",
+            "message": f"Request {Request_Id} has been added to the processing queue.",
+            "code": 202,
+            "num_of_cpu": cpu_count,
+            "num_of_threads_created": NUM_WORKERS
+        })
+    
+    except Exception as e:
+        return jsonify({
+            "Request_Id": Request_Id,
+            "status": "failed",
+            "message": f"Error processing request: {str(e)}",
+            "code": 500,
+            "num_of_cpu": cpu_count,
+            "num_of_threads_created": NUM_WORKERS
+        }), 500
 
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=app.config["PORT"])
