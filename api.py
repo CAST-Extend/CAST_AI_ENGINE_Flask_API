@@ -91,6 +91,28 @@ def home():
         "success" : "Welcome to CAST Code Fix AI ENGINE."
     }, 200
 
+@app.route("/api-python/v1/CheckMongoDBConnection")
+def check_mongodb_connection():
+    try:
+        # Create a MongoClient object
+        mongo_db = AppMongoDb(app.config)
+        
+        # Try to list collections to ensure the connection is working
+        mongodb_collections = mongo_db.list_collections()
+        
+        return {
+            "status": 200,
+            "success" : "Connection to MongoDB successful!",
+            "mongodb_collections" : mongodb_collections
+        }, 200
+    
+    except Exception as e:
+        print(f"Connection to MongoDB failed: {e}")
+        return {
+            "status": 500,
+            "failed" : f"Connection to MongoDB failed: {e}"
+        }, 500
+
 @app.route("/api-python/v1/ProcessRequest/<string:Request_Id>")
 def process_request(Request_Id):
     with queue_lock:
