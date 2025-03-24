@@ -11,6 +11,7 @@ class Config:
     IMAGING_API_KEY = ""
 
     MONGODB_CONNECTION_STRING = ""
+    MONGODB_NAME = ""
     
     MAX_THREADS = 20
     PORT = 8081
