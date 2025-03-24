@@ -12,6 +12,13 @@ class Config:
 
     MONGODB_CONNECTION_STRING = ""
     MONGODB_NAME = ""
+
+    # RabbitMQ Configuration
+    RABBITMQ_HOST = "localhost"
+    RABBITMQ_PORT = 5672
+    RABBITMQ_VHOST = "/"
+    RABBITMQ_USER = ""
+    RABBITMQ_PASSWORD = ""
     
     MAX_THREADS = 20
     PORT = 8081
