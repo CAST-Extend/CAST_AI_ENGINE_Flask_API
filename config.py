@@ -21,4 +21,4 @@ class Config:
     RABBITMQ_PASSWORD = ""
     
     MAX_THREADS = 20
-    PORT = 8081
+    PORT = 8091
