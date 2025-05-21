@@ -76,6 +76,12 @@ class AppLLM:
 
         MAX_RETRIES = 3
 
+        tokens = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+            }
+
         try:
             """
             Sends a prompt to the AI model and retrieves a valid JSON response.
@@ -106,7 +112,7 @@ class AppLLM:
             # Prepare the payload for the AI API
             payload = { "model": self.model_name, "messages": messages, "temperature": 0 }
 
-            # with open(f"payload_{ObjectID}.json", "w") as f:
+            # with open(f"payload_for_objectID_{ObjectID}.json", "w") as f:
             #     json.dump(payload, f, indent=4)
 
             # Loop for retrying the request in case of errors or invalid JSON.
@@ -130,7 +136,7 @@ class AppLLM:
                         # with open(f"AI_Response_for_ObjectID_{ObjectID}.json", "w") as f:
                         #     json.dump(response_json, f, indent=4)
                         #     json.dump(ai_response, f, indent=4)
-                        #     Ai_Response_content_token = count_chatgpt_tokens(ai_model_name, str(response_content))
+                        #     Ai_Response_content_token = self.count_tokens(str(response_content))
                         #     print("AI Response content token: ",{Ai_Response_content_token})
 
 
@@ -139,7 +145,13 @@ class AppLLM:
 
                         print(f"processed objectID - {ObjectID}.")
 
-                        return ai_response, "success"
+                        tokens = {
+                            "prompt_tokens": response_json["usage"]["prompt_tokens"],
+                            "completion_tokens": response_json["usage"]["completion_tokens"],
+                            "total_tokens": response_json["usage"]["total_tokens"]
+                            }
+
+                        return ai_response, "success", tokens
                     except json.JSONDecodeError as e:
                         # Log the JSON parsing error and prepare for retry if needed.
                         logging.error(f"JSON decoding failed on attempt {attempt}: {e}")
@@ -166,17 +178,17 @@ class AppLLM:
                         else:
                             # If max retries reached, log an error and return None.
                             logging.error("Max retries reached. Failed to obtain valid JSON from AI.")
-                            return None, "Max retries reached! Failed to obtain valid JSON from AI. Please Resend the request..."
+                            return None, "Max retries reached! Failed to obtain valid JSON from AI. Please Resend the request...", tokens
 
                 except Exception as e:
                     # Log any general errors during the request, and retry if possible.
                     print(f"Error during AI model completion for the objectID-{ObjectID}:  {e}")
-                    return None, f"{e}. Please Resend the request..."
+                    return None, f"{e}. Please Resend the request...", tokens
 
             # Return None if all attempts fail.
-            return None, "AI Model failed to fix the code. Please Resend the request..."
+            return None, "AI Model failed to fix the code. Please Resend the request...", tokens
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
             self.app_logger.log_error(e, "ask_ai_model")
-            return None, f"{e}. Please Resend the request..."
+            return None, f"{e}. Please Resend the request...", tokens
