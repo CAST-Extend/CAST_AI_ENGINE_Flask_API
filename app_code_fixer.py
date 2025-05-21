@@ -228,13 +228,17 @@ class AppCodeFixer:
             if prompt_token < (self.llm.model_max_input_tokens - target_response_size) and target_response_size < self.llm.model_max_output_tokens:
             # if True:
                 # Ask the AI model for a response
-                response_content, ai_msg = self.llm.ask_ai_model(
+                response_content, ai_msg, tokens = self.llm.ask_ai_model(
                     prompt_content,
                     json_resp,
                     target_response_size,
                     ObjectID,
                 )
                 logging.info(f"Response Content: {response_content}")
+
+                object_dictionary["prompt_tokens"] = tokens["prompt_tokens"]
+                object_dictionary["completion_tokens"] = tokens["completion_tokens"]
+                object_dictionary["total_tokens"] = tokens["total_tokens"]
 
                 if response_content == None:
                     object_dictionary["status"] = "failure"
@@ -419,13 +423,17 @@ class AppCodeFixer:
             if prompt_token < (self.llm.model_max_input_tokens - target_response_size) and target_response_size < self.llm.model_max_output_tokens:
             # if True:
                 # Ask the AI model for a response
-                response_content, ai_msg = self.llm.ask_ai_model(
+                response_content, ai_msg, tokens = self.llm.ask_ai_model(
                     prompt_content,
                     json_dep_resp,
                     target_response_size,
                     dep_object_id,
                 )
                 logging.info(f"Response Content: {response_content}")
+
+                object_dictionary["prompt_tokens"] = tokens["prompt_tokens"]
+                object_dictionary["completion_tokens"] = tokens["completion_tokens"]
+                object_dictionary["total_tokens"] = tokens["total_tokens"]
 
                 if response_content == None:
                     object_dictionary["status"] = "failure"
@@ -533,7 +541,7 @@ class AppCodeFixer:
             # if True:
             if prompt_token < (self.llm.model_max_input_tokens - target_response_size) and target_response_size < self.llm.model_max_output_tokens:
                 # Ask the AI model for a response
-                response_content, _ = self.llm.ask_ai_model(
+                response_content, _, tokens = self.llm.ask_ai_model(
                     prompt_content,
                     json_resp,
                     max_tokens=target_response_size,
