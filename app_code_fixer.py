@@ -31,7 +31,7 @@ class AppCodeFixer:
         try:
 
             object_dictionary = {"objectid": ObjectID, "status": "", "message": ""}
-            content_info_dictionary = {"filefullname": "", "originalfilecontent": ""}
+            content_info_dictionary = {"filefullname": "", "objects":[], "originalfilecontent": ""}
 
             object_id = ObjectID
             logging.info("---------------------------------------------------------------------------------------------------------------------------------------")
@@ -281,10 +281,12 @@ class AppCodeFixer:
                             for i, file in enumerate(engine_output["contentinfo"]):
                                 if file["filefullname"] == file_fullname:
                                     file_flag = True
+                                    engine_output["contentinfo"][i]["objects"].append(object_id)
                                     engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code + end_comment
 
                         if not file_flag:
                             content_info_dictionary["filefullname"] = file_fullname
+                            content_info_dictionary["objects"].append(object_id)
                             content_info_dictionary["originalfilecontent"] = [file_content, [{f"({start_line},{end_line})" : comment + readable_code + end_comment}]]
 
                         if (content_info_dictionary["filefullname"] or content_info_dictionary["originalfilecontent"]):
@@ -375,7 +377,7 @@ class AppCodeFixer:
     ):
         try:
             object_dictionary = {"objectid": dep_object_id, "status": "", "message": "", "dependent_info":f"this object is depenedent on ObjectID-{ObjectID}"}
-            content_info_dictionary = {"filefullname": "", "originalfilecontent": ""}
+            content_info_dictionary = {"filefullname": "", "objects":[], "originalfilecontent": ""}
 
             json_dep_resp = """
             {
@@ -467,10 +469,12 @@ class AppCodeFixer:
                             for i, file in enumerate(engine_output["contentinfo"]):
                                 if file["filefullname"] == file_fullname:
                                     file_flag = True
+                                    engine_output["contentinfo"][i]["objects"].append(dep_object_id)
                                     engine_output["contentinfo"][i]["originalfilecontent"][1][0][f"({start_line},{end_line})"] = comment + readable_code + end_comment
 
                         if not file_flag:
                             content_info_dictionary["filefullname"] = file_fullname
+                            content_info_dictionary["objects"].append(dep_object_id)
                             content_info_dictionary["originalfilecontent"] = [dep_object_file_content, [{f"({start_line},{end_line})" : comment + readable_code + end_comment}]]
 
                     else:
