@@ -13,12 +13,20 @@ class Config:
     MONGODB_CONNECTION_STRING = ""
     MONGODB_NAME = ""
 
+    # message queue
+    MQ_VENDOR = "kafka"  # or "rabbitmq"
+
     # RabbitMQ Configuration
     RABBITMQ_HOST = "localhost"
     RABBITMQ_PORT = 5672
     RABBITMQ_VHOST = "/"
-    RABBITMQ_USER = ""
-    RABBITMQ_PASSWORD = ""
-    
+    RABBITMQ_USER = "guest"
+    RABBITMQ_PASSWORD = "guest"
+
+    # Kafka Configuration
+    KAFKA_BOOTSTRAP_SERVERS = "kafka:9092"
+    KAFKA_GROUP_ID = "cast_ai_group"
+    KAFKA_AUTO_OFFSET_RESET = "earliest"
+
     MAX_THREADS = 20
     PORT = 8081
