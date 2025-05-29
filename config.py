@@ -1,17 +1,17 @@
 class Config:
     MODEL_NAME = "gpt-4o-mini"
-    MODEL_VERSION = ""
-    MODEL_URL = ""
-    MODEL_API_KEY = ""
+    MODEL_VERSION = "null"
+    MODEL_URL = "null"
+    MODEL_API_KEY = "null"
     MODEL_MAX_INPUT_TOKENS = 128000
     MODEL_MAX_OUTPUT_TOKENS = 16384
     MODEL_INVOCATION_DELAY_IN_SECONDS = 10
 
-    IMAGING_URL = ""
+    IMAGING_URL = "null"
     IMAGING_API_KEY = ""
 
-    MONGODB_CONNECTION_STRING = ""
-    MONGODB_NAME = ""
+    MONGODB_CONNECTION_STRING = "null"
+    MONGODB_NAME = "null"
 
     # message queue
     MQ_VENDOR = "kafka"  # or "rabbitmq"
@@ -29,4 +29,4 @@ class Config:
     KAFKA_AUTO_OFFSET_RESET = "earliest"
 
     MAX_THREADS = 20
-    PORT = 8081
+    PORT = 8000

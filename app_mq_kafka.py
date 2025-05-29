@@ -1,8 +1,7 @@
+from base_mq import BaseMQ
 from kafka import KafkaProducer, KafkaConsumer
 from flask import Config as FlaskConfig
-import json
-import threading
-from app_mq import BaseMQ
+import json, threading
 
 class KafkaMQ(BaseMQ):
     def __init__(self, config: FlaskConfig):

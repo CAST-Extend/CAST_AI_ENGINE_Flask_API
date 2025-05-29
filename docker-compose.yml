@@ -28,7 +28,7 @@ services:
       dockerfile: Dockerfile
     container_name: flask-api
     ports:
-      - "8081:8081"
+      - "8000:8000"
     depends_on:
       - kafka
     environment:
