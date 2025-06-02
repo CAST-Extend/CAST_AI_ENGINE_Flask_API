@@ -50,7 +50,7 @@ def request_worker():
 
         def callback(message):
             try:
-                request_id = message.decode()
+                request_id = message.decode() if isinstance(message, bytes) else message
                 print(f"Processing request {request_id}")
 
                 # Update status to Processing
@@ -79,11 +79,11 @@ def request_worker():
                 print(f"Request {request_id} processed successfully")
 
             except Exception as e:
-                # Update status to Failed
+                fallback_request_id = request_id if 'request_id' in locals() else 'unknown'
                 queue.publish(
                     topic='status_queue',
                     message=json.dumps({
-                        'request_id': request_id,
+                        'request_id': fallback_request_id,
                         'status': 'Failed',
                         'error': str(e)
                     })

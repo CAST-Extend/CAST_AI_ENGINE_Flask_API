@@ -30,6 +30,10 @@ class KafkaMQ(BaseMQ):
                 topic,
                 bootstrap_servers=self.config["KAFKA_BOOTSTRAP_SERVERS"],
                 group_id=self.config["KAFKA_GROUP_ID"],
+                enable_auto_commit=True,
+                session_timeout_ms=10000,
+                heartbeat_interval_ms=3000,
+                max_poll_interval_ms=300000,
                 auto_offset_reset=self.config["KAFKA_AUTO_OFFSET_RESET"],
                 value_deserializer=lambda m: json.loads(m.decode("utf-8"))
             )
