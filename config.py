@@ -14,7 +14,7 @@ class Config:
     MONGODB_NAME = "null"
 
     # message queue
-    MQ_VENDOR = "kafka"  # or "rabbitmq"
+    MQ_VENDOR = "mongodb"  # or "kafka" or "rabbitmq"
 
     # RabbitMQ Configuration
     RABBITMQ_HOST = "localhost"
