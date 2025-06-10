@@ -1,117 +1,84 @@
-import multiprocessing
-import requests
-import warnings
+import asyncio
 import json
+import multiprocessing
+import warnings
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from flask_cors import CORS
 from app_imaging import AppImaging
 from app_llm import AppLLM
 from app_logger import AppLogger
 from app_code_fixer import AppCodeFixer
-from app_mongo import AppMongoDb
+from app_mongo import AppMongoDb  # You will need to update this to motor-based MongoDB client separately
 from app_mq import AppMessageQueue
 from config import Config
-from threading import Thread
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
-# Suppress the InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-
-app = Flask(__name__)
-CORS(app)
-
-# Load configuration from config.py
-app.config.from_object(Config)
-
-# Initialize components
-mongo_db = AppMongoDb(app.config)
-app_logger = AppLogger(mongo_db)
-ai_model = AppLLM(app_logger, app.config)
-imaging = AppImaging(app_logger, app.config)
-code_fixer = AppCodeFixer(app_logger, mongo_db, ai_model, imaging)
-
-# Suppress specific FutureWarning
+# Suppress warnings
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
     message="`clean_up_tokenization_spaces` was not set.*",
 )
 
-# MQ helper to avoid shared instance
-def get_mq():
-    return AppMessageQueue(app_logger, app.config).open()
+app = Flask(__name__)
+CORS(app)
+app.config.from_object(Config)
 
-# Worker function to process requests
-def request_worker():
-    queue = None
-    try:
-        queue = get_mq()
+# Initialize components (Assuming synchronous interfaces for now)
+mongo_db = AppMongoDb(app.config)
+app_logger = AppLogger(mongo_db)
+ai_model = AppLLM(app_logger, app.config)
+imaging = AppImaging(app_logger, app.config)
+code_fixer = AppCodeFixer(app_logger, mongo_db, ai_model, imaging)
 
-        def callback(message):
-            try:
-                request_id = message.decode() if isinstance(message, bytes) else message
-                print(f"Processing request {request_id}")
-
-                # Update status to Processing
-                queue.publish(
-                    topic='status_queue',
-                    message=json.dumps({
-                        'request_id': request_id,
-                        'status': 'Processing'
-                    })
-                )
-
-                # Process the request
-                response = code_fixer.process_request_logic(request_id)
-
-                # Update status based on result
-                status = 'Completed' if response.get('status') == 'success' else 'Failed'
-                queue.publish(
-                    topic='status_queue',
-                    message=json.dumps({
-                        'request_id': request_id,
-                        'status': status,
-                        'response': response
-                    })
-                )
-
-                print(f"Request {request_id} processed successfully")
-
-            except Exception as e:
-                fallback_request_id = request_id if 'request_id' in locals() else 'unknown'
-                queue.publish(
-                    topic='status_queue',
-                    message=json.dumps({
-                        'request_id': fallback_request_id,
-                        'status': 'Failed',
-                        'error': str(e)
-                    })
-                )
-                raise
-
-        print(' [*] Waiting for messages. To exit press CTRL+C')
-        queue.process(topic='request_queue', callback=callback)
-
-    except Exception as err:
-        print(f' [*] Worker thread failed with {type(err)=}: {err=}')
-        if queue is not None:
-            queue.close()
-
-# Start multiple worker threads
-worker_threads = []
 cpu_count = multiprocessing.cpu_count()
 NUM_WORKERS = min(2 * cpu_count, app.config["MAX_THREADS"])
 
-print(f"Total number of CPU Cores - {cpu_count}")
-print(f"Total number of workers created - {NUM_WORKERS}")
+async def process_message_async(queue, message):
+    request_id = message.decode() if isinstance(message, bytes) else message
+    print(f"Processing request (async) {request_id}")
 
-for _ in range(NUM_WORKERS):
-    worker_thread = Thread(target=request_worker, daemon=True)
-    worker_thread.start()
-    worker_threads.append(worker_thread)
+    # Update status to Processing
+    queue.publish(
+        topic='status_queue',
+        message=json.dumps({
+            'request_id': request_id,
+            'status': 'Processing'
+        })
+    )
 
-# ============ ROUTES ============
+    # Process the request synchronously here, if possible adapt code_fixer to async
+    response = code_fixer.process_request_logic(request_id)
+
+    # Update status based on result
+    status = 'Completed' if response.get('status') == 'success' else 'Failed'
+    queue.publish(
+        topic='status_queue',
+        message=json.dumps({
+            'request_id': request_id,
+            'status': status,
+            'response': response
+        })
+    )
+    print(f"Request {request_id} processed successfully (async)")
+
+async def worker_loop(queue):
+    print(f"Worker loop started (async)")
+    while True:
+        # Try to get a message non-blocking or with timeout
+        msg = queue.get(topic='request_queue')
+        if msg:
+            try:
+                await process_message_async(queue, msg)
+            except Exception as e:
+                print(f"Error processing message: {e}")
+        else:
+            # No message, sleep a bit to prevent busy loop
+            await asyncio.sleep(1)
+
+def get_mq():
+    # MQ interface is still synchronous here; ideally replace with async version if possible
+    return AppMessageQueue(app_logger, app.config).open()
 
 @app.route("/api-python/v1/")
 def home():
@@ -145,7 +112,6 @@ def process_request(Request_Id):
     try:
         queue = get_mq()
 
-        # Check current status
         body = queue.get(topic='status_queue')
 
         if body is not None:
@@ -164,7 +130,6 @@ def process_request(Request_Id):
                     response_data.update(status_message['response'])
                 return jsonify(response_data)
 
-        # If not found in status queue, add to request queue
         print(f"[API] Publishing {Request_Id} to request_queue")
         queue.publish(topic='request_queue', message=Request_Id)
         print(f"[API] Publishing status 'Queued' for {Request_Id}")
@@ -199,5 +164,16 @@ def process_request(Request_Id):
         if queue is not None:
             queue.close()
 
+async def main():
+    queue = get_mq()
+    tasks = []
+    for _ in range(NUM_WORKERS):
+        tasks.append(asyncio.create_task(worker_loop(queue)))
+    await asyncio.gather(*tasks)
+
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=app.config["PORT"])
+    import uvicorn
+    # Start background workers and then run Flask app using uvicorn for async support
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    uvicorn.run(app, host="0.0.0.0", port=app.config["PORT"])
