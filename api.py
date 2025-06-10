@@ -165,9 +165,9 @@ def process_request(Request_Id):
                 return jsonify(response_data)
 
         # If not found in status queue, add to request queue
+        print(f"[API] Publishing {Request_Id} to request_queue")
         queue.publish(topic='request_queue', message=Request_Id)
-
-        # Update status to Queued
+        print(f"[API] Publishing status 'Queued' for {Request_Id}")
         queue.publish(
             topic='status_queue',
             message=json.dumps({
