@@ -1,7 +1,8 @@
 from flask import Config
+from base_mq import BaseMQ
 from app_mq_rabbitmq import RabbitMQ
 from app_mq_kafka import KafkaMQ
-from app_mq_mongodb import MongoDBMQ
+from app_mq_mongodb import MongoDBMQ  # ← NEW IMPORT
 
 class AppMessageQueue:
     def __init__(self, logger, config: Config):
@@ -9,12 +10,12 @@ class AppMessageQueue:
         self.logger = logger
         self.vendor = config["MQ_VENDOR"]
 
-    async def open(self):
+    def open(self):
         if self.vendor == 'rabbitmq':
-            raise NotImplementedError("RabbitMQ is not async-supported in current setup.")
+            return RabbitMQ(self.config)
         elif self.vendor == 'kafka':
-            raise NotImplementedError("Kafka is not async-supported in current setup.")
-        elif self.vendor == 'mongodb':
+            return KafkaMQ(self.config)
+        elif self.vendor == 'mongodb':  # ← NEW CASE
             return MongoDBMQ(self.config)
         else:
             raise NotImplementedError(f"Unsupported MQ vendor: {self.vendor}")
