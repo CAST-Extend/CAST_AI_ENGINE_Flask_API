@@ -1,14 +1,9 @@
-# base_mq.py
-
 class BaseMQ:
-    def close(self):
+    async def close(self):
         raise NotImplementedError()
 
-    def publish(self, topic, message):
+    async def publish(self, topic, message):
         raise NotImplementedError()
 
-    def process(self, topic, callback):
-        raise NotImplementedError()
-
-    def get(self, topic):
+    async def get(self, topic):
         raise NotImplementedError()
