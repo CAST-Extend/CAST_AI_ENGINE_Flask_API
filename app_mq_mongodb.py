@@ -12,6 +12,7 @@ class MongoDBMQ(BaseMQ):
         self.db = self.client[config["MONGODB_NAME"]]
         self.lock = threading.Lock()
 
+        # Optional: TTL index for automatic cleanup (1 day)
         for topic in ['request_queue', 'status_queue']:
             self.db[topic].create_index("timestamp", expireAfterSeconds=86400)
 
@@ -46,6 +47,14 @@ class MongoDBMQ(BaseMQ):
             print(f"[MongoDBMQ] Peeked from {topic}: {doc['message']}")
         return doc["message"] if doc else None
 
+    def get_latest_status(self, topic, request_id):
+        doc = self.db[topic].find({"request_id": request_id}).sort("timestamp", -1).limit(1)
+        doc = list(doc)
+        if doc:
+            print(f"[MongoDBMQ] Latest status for {request_id}: {doc[0]['message']}")
+            return doc[0]["message"]
+        return None
+
     def process(self, topic, callback):
         def run():
             print(f"[MongoDBMQ] Starting processor for topic: {topic}")
@@ -59,6 +68,7 @@ class MongoDBMQ(BaseMQ):
                         print(f"[MongoDBMQ] Processing error: {e}")
                 else:
                     time.sleep(1)
+
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
 

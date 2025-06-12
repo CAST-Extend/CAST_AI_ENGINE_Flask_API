@@ -32,11 +32,7 @@ imaging = AppImaging(app_logger, app.config)
 code_fixer = AppCodeFixer(app_logger, mongo_db, ai_model, imaging)
 
 # Suppress specific FutureWarning
-warnings.filterwarnings(
-    "ignore",
-    category=FutureWarning,
-    message="`clean_up_tokenization_spaces` was not set.*",
-)
+warnings.filterwarnings("ignore", category=FutureWarning, message="`clean_up_tokenization_spaces` was not set.*")
 
 # MQ helper to avoid shared instance
 def get_mq():
@@ -67,6 +63,7 @@ def request_worker():
 
                 # Update status based on result
                 status = 'Completed' if response.get('status') == 'success' else 'Failed'
+
                 queue.publish(
                     topic='status_queue',
                     message=json.dumps({
@@ -115,10 +112,7 @@ for _ in range(NUM_WORKERS):
 
 @app.route("/api-python/v1/")
 def home():
-    return {
-        "status": 200,
-        "success": "Welcome to CAST Code Fix AI ENGINE."
-    }, 200
+    return {"status": 200, "success": "Welcome to CAST Code Fix AI ENGINE."}, 200
 
 @app.route("/api-python/v1/CheckMongoDBConnection")
 def check_mongodb_connection():
@@ -145,28 +139,24 @@ def process_request(Request_Id):
     try:
         queue = get_mq()
 
-        # Check if already exists in status_queue
-        existing_status = queue.get(topic='status_queue', filter_by={"request_id": Request_Id})
-        if existing_status:
-            status_message = json.loads(existing_status)
+        latest_status_json = queue.get_latest_status("status_queue", Request_Id)
+        if latest_status_json:
+            status_message = json.loads(latest_status_json)
             status = status_message['status']
-            response_data = {
-                "Request_Id": Request_Id,
-                "status": status.lower(),
-                "message": f"Request {Request_Id} is {status}",
-                "code": 202 if status == 'Processing' else 200 if status == 'Completed' else 500,
-                "num_of_cpu": cpu_count,
-                "num_of_threads_created": NUM_WORKERS
-            }
-            if 'response' in status_message:
-                response_data.update(status_message['response'])
-            return jsonify(response_data)
+            if status in ['Processing', 'Queued']:
+                response_data = {
+                    "Request_Id": Request_Id,
+                    "status": status.lower(),
+                    "message": f"Request {Request_Id} is {status}",
+                    "code": 202,
+                    "num_of_cpu": cpu_count,
+                    "num_of_threads_created": NUM_WORKERS
+                }
+                return jsonify(response_data)
 
-        # If new, publish
-        print(f"[API] Publishing {Request_Id} to request_queue")
+        # Requeue request regardless of status (e.g., retry if Completed or Failed)
+        print(f"[API] Re-publishing {Request_Id} to request_queue (retry)")
         queue.publish(topic='request_queue', message=Request_Id)
-
-        print(f"[API] Publishing status 'Queued' for {Request_Id}")
         queue.publish(
             topic='status_queue',
             message=json.dumps({
