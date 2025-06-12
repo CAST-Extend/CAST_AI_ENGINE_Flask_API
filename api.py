@@ -145,28 +145,27 @@ def process_request(Request_Id):
     try:
         queue = get_mq()
 
-        # Check current status
-        body = queue.get(topic='status_queue')
+        # Check if already exists in status_queue
+        existing_status = queue.get(topic='status_queue', filter_by={"request_id": Request_Id})
+        if existing_status:
+            status_message = json.loads(existing_status)
+            status = status_message['status']
+            response_data = {
+                "Request_Id": Request_Id,
+                "status": status.lower(),
+                "message": f"Request {Request_Id} is {status}",
+                "code": 202 if status == 'Processing' else 200 if status == 'Completed' else 500,
+                "num_of_cpu": cpu_count,
+                "num_of_threads_created": NUM_WORKERS
+            }
+            if 'response' in status_message:
+                response_data.update(status_message['response'])
+            return jsonify(response_data)
 
-        if body is not None:
-            status_message = json.loads(body)
-            if status_message['request_id'] == Request_Id:
-                status = status_message['status']
-                response_data = {
-                    "Request_Id": Request_Id,
-                    "status": status.lower(),
-                    "message": f"Request {Request_Id} is {status}",
-                    "code": 202 if status == 'Processing' else 200 if status == 'Completed' else 500,
-                    "num_of_cpu": cpu_count,
-                    "num_of_threads_created": NUM_WORKERS
-                }
-                if 'response' in status_message:
-                    response_data.update(status_message['response'])
-                return jsonify(response_data)
-
-        # If not found in status queue, add to request queue
+        # If new, publish
         print(f"[API] Publishing {Request_Id} to request_queue")
         queue.publish(topic='request_queue', message=Request_Id)
+
         print(f"[API] Publishing status 'Queued' for {Request_Id}")
         queue.publish(
             topic='status_queue',
