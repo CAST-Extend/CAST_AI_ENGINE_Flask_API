@@ -1,8 +1,7 @@
-from base_mq import BaseMQ
 import pika, json, threading
 from flask import Config as FlaskConfig
 
-class RabbitMQ(BaseMQ):
+class RabbitMQ:
     def __init__(self, config: FlaskConfig):
         self.config = config
         self.connection_params = pika.ConnectionParameters(

@@ -1,4 +1,3 @@
-# from base_mq import BaseMQ
 # from kafka import KafkaProducer, KafkaConsumer
 # from flask import Config as FlaskConfig
 # import json, threading

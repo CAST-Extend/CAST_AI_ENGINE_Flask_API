@@ -1,20 +1,18 @@
-from base_mq import BaseMQ
+# === Updated app_mq_mongodb.py ===
 from flask import Config as FlaskConfig
 from pymongo import MongoClient
 import threading
 import time
 import json
 
-class MongoDBMQ(BaseMQ):
+class MongoDBMQ:
     def __init__(self, config: FlaskConfig):
         self.config = config
         self.client = MongoClient(config["MONGODB_CONNECTION_STRING"])
         self.db = self.client[config["MONGODB_NAME"]]
         self.lock = threading.Lock()
-
-        # Optional: TTL index for automatic cleanup (1 day)
-        for topic in ['request_queue', 'status_queue']:
-            self.db[topic].create_index("timestamp", expireAfterSeconds=86400)
+        self.queue_col = self.db["status_queue"]
+        self.queue_col.create_index("timestamp", expireAfterSeconds=86400)
 
     def publish(self, topic, message):
         print(f"[MongoDBMQ] Publishing message to {topic}: {message}")
@@ -27,50 +25,40 @@ class MongoDBMQ(BaseMQ):
             else:
                 message_json = message
 
-            request_id = message_json.get("request_id") or message_json.get("message") or None
-
-            doc = {
-                "message": message,
-                "status": "queued",
-                "timestamp": time.time()
-            }
+            request_id = message_json.get("request_id")
+            message_json["timestamp"] = time.time()
 
             if request_id:
-                doc["request_id"] = request_id
-
-            self.db[topic].insert_one(doc)
+                self.db[topic].replace_one(
+                    {"request_id": request_id},
+                    message_json,
+                    upsert=True
+                )
+            else:
+                self.db[topic].insert_one(message_json)
 
     def get(self, topic, filter_by=None):
         query = filter_by if filter_by else {}
-        doc = self.db[topic].find_one(query)
+        doc = self.db[topic].find_one_and_update(
+            query,
+            {"$set": {"status": "processing", "processing_start": time.time()}},
+            sort=[("timestamp", 1)]
+        )
         if doc:
-            print(f"[MongoDBMQ] Peeked from {topic}: {doc['message']}")
-        return doc["message"] if doc else None
+            print(f"[MongoDBMQ] Picked from {topic}: {doc}")
+        return doc
 
     def get_latest_status(self, topic, request_id):
         doc = self.db[topic].find({"request_id": request_id}).sort("timestamp", -1).limit(1)
         doc = list(doc)
         if doc:
-            print(f"[MongoDBMQ] Latest status for {request_id}: {doc[0]['message']}")
-            return doc[0]["message"]
+            print(f"[MongoDBMQ] Latest status for {request_id}: {doc[0]}")
+            return doc[0]
         return None
-
-    def process(self, topic, callback):
-        def run():
-            print(f"[MongoDBMQ] Starting processor for topic: {topic}")
-            while True:
-                doc = self.db[topic].find_one_and_delete({})
-                if doc:
-                    try:
-                        print(f"[MongoDBMQ] Processing message: {doc['message']}")
-                        callback(doc["message"])
-                    except Exception as e:
-                        print(f"[MongoDBMQ] Processing error: {e}")
-                else:
-                    time.sleep(1)
-
-        thread = threading.Thread(target=run, daemon=True)
-        thread.start()
 
     def close(self):
         self.client.close()
+
+    @property
+    def db_connection(self):
+        return self.db

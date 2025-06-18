@@ -1,5 +1,4 @@
 from flask import Config
-from base_mq import BaseMQ
 from app_mq_rabbitmq import RabbitMQ
 # from app_mq_kafka import KafkaMQ
 from app_mq_mongodb import MongoDBMQ  # ← NEW IMPORT
