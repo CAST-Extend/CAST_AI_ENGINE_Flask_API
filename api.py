@@ -43,14 +43,12 @@ def request_worker():
                 request_id = doc.get("request_id")
                 retry_count = doc.get("retry_count", 0)
 
-                print(f"[WORKER] Processing: {request_id}")
+                success = queue.update_status("status_queue", request_id, "processing")
+                if not success:
+                    time.sleep(0.5)
+                    continue  # Another thread may have taken it
 
-                queue.publish("status_queue", {
-                    "request_id": request_id,
-                    "status": "processing",
-                    "timestamp": time.time(),
-                    "retry_count": retry_count
-                })
+                print(f"[WORKER] Processing: {request_id}")
 
                 result = code_fixer.process_request_logic(request_id)
                 status = "completed" if result.get("status") == "success" else "failed"
