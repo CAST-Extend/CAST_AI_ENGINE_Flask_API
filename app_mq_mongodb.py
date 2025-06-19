@@ -9,7 +9,7 @@ class MongoDBMQ:
     def __init__(self, config: FlaskConfig):
         self.config = config
         self.client = MongoClient(config["MONGODB_CONNECTION_STRING"])
-        self.db = self.client[config["MONGODB_NAME"]]
+        self.db = self.client[config["MONGODB_DATABASE_NAME"]]
         self.lock = threading.Lock()
         self.queue_col = self.db["status_queue"]
         self.queue_col.create_index("timestamp", expireAfterSeconds=86400)
