@@ -69,7 +69,7 @@ def request_worker():
 
 worker_threads = []
 cpu_count = multiprocessing.cpu_count()
-NUM_WORKERS = min(2 * cpu_count, app.config["MAX_THREADS"])
+NUM_WORKERS = min(2 * cpu_count, int(app.config["MAX_THREADS"]))
 
 print(f"Total number of CPU Cores - {cpu_count}")
 print(f"Total number of workers created - {NUM_WORKERS}")

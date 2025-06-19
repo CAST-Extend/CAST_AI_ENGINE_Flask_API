@@ -14,7 +14,7 @@ class Config:
 
     # MongoDB configs...
     MONGODB_CONNECTION_STRING = "mongodb://localhost:27017"
-    MONGODB_NAME = "cast_queue_db"
+    MONGODB_DATABASE_NAME = "cast_queue_db"
 
     # Use queue mechanism
     MQ_VENDOR = "mongodb"  # or "kafka" or "rabbitmq"

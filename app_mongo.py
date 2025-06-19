@@ -4,7 +4,7 @@ from pymongo import MongoClient
 class AppMongoDb:
     def __init__(self, config: FlaskConfig):
         self.connection_string = config["MONGODB_CONNECTION_STRING"]
-        self.mongodb_name = config["MONGODB_NAME"]
+        self.mongodb_name = config["MONGODB_DATABASE_NAME"]
         self.client = MongoClient(self.connection_string)
 
     def get_collection(self, collection_name):
