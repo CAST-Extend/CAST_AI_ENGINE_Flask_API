@@ -12,9 +12,9 @@ class AppLLM:
         self.model_name = config["MODEL_NAME"]
         self.model_version = config["MODEL_VERSION"] # UNUSED
         self.model_url = config["MODEL_URL"]
-        self.model_max_input_tokens = config["MODEL_MAX_INPUT_TOKENS"]
-        self.model_max_output_tokens = config["MODEL_MAX_OUTPUT_TOKENS"]
-        self.model_invocation_delay = config["MODEL_INVOCATION_DELAY_IN_SECONDS"]
+        self.model_max_input_tokens = int(config["MODEL_MAX_INPUT_TOKENS"])
+        self.model_max_output_tokens = int(config["MODEL_MAX_OUTPUT_TOKENS"])
+        self.model_invocation_delay = int(config["MODEL_INVOCATION_DELAY_IN_SECONDS"])
         self.headers = { "Authorization": f"Bearer {config["MODEL_API_KEY"]}", "Content-Type": "application/json" }
         self.app_logger = app_logger
         self.first_prompt = True
@@ -51,6 +51,18 @@ class AppLLM:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
             self.app_logger.log_error("count_tokens", e)
+
+    def truncate_prompt(self, prompt, max_tokens):
+        """
+        Truncate the prompt so that its token count does not exceed max_tokens.
+        Returns the truncated prompt and the number of tokens.
+        """
+        tokens = self.encoding.encode(prompt)
+        if len(tokens) <= max_tokens:
+            return prompt, len(tokens)
+        truncated_tokens = tokens[:max_tokens]
+        truncated_prompt = self.encoding.decode(truncated_tokens)
+        return truncated_prompt, max_tokens
 
     def ask_ai_model(
         self,
@@ -115,6 +127,17 @@ class AppLLM:
             # with open(f"payload_for_objectID_{ObjectID}.json", "w") as f:
             #     json.dump(payload, f, indent=4)
 
+            # Check prompt token length before sending to LLM
+            prompt_token_count = self.count_tokens(prompt_content)
+            if prompt_token_count > self.model_max_input_tokens:
+                self.app_logger.log_error(
+                    f"Prompt too long: {prompt_token_count} tokens (limit: {self.model_max_input_tokens})",
+                    f"ask_ai_model ObjectID={ObjectID}"
+                )
+                # Optionally, truncate the prompt automatically
+                prompt_content, prompt_token_count = self.truncate_prompt(prompt_content, self.model_max_input_tokens)
+                # Or, if you want to reject instead of truncate, uncomment below and comment out the above two lines:
+                # return None, f"Prompt too long: {prompt_token_count} tokens (limit: {self.model_max_input_tokens}). Please shorten your input.", {"prompt_tokens": prompt_token_count, "completion_tokens": 0, "total_tokens": prompt_token_count}
             # Loop for retrying the request in case of errors or invalid JSON.
             for attempt in range(1, MAX_RETRIES + 1):
                 try:

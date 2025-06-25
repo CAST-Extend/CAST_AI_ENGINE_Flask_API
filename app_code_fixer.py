@@ -49,9 +49,10 @@ class AppCodeFixer:
                 object_data = object_response.json()  # Parse object data
                 object_type = object_data["typeId"]  # Get object type
                 object_signature = object_data["mangling"]  # Get object signature
-                object_technology = object_data["programmingLanguage"]["name"]  # Get programming language
+                object_technology = object_data.get("programmingLanguage", {}).get("name", "")
 
-                if object_data["sourceLocations"] == None:
+                source_locations = object_data.get("sourceLocations")
+                if not source_locations:
                     object_dictionary["status"] = "failure"
                     object_dictionary["message"] = f"failed because of reason: sourceLocations not available for this object from Imaging API -> {object_url}"
                     print(object_dictionary["message"])
@@ -73,6 +74,12 @@ class AppCodeFixer:
 
                 # fetch object code
                 obj_code = self.imaging.get_source('object', TenantName, ApplicationName, object_field_id, object_start_line, object_end_line)
+                if obj_code is None:
+                    object_dictionary["status"] = "failure"
+                    object_dictionary["message"] = f"Failed to fetch object code using Imaging API for fileId={object_field_id}, startLine={object_start_line}, endLine={object_end_line}."
+                    print(object_dictionary["message"])
+                    engine_output["objects"].append(object_dictionary)
+                    return engine_output
 
                 # Fetch callees for the current object
                 object_callees_response, object_callees_url = self.imaging.get_callees(TenantName, ApplicationName, object_id)
@@ -105,7 +112,14 @@ class AppCodeFixer:
                             impact_object_data = (impact_object_response.json())  # Parse impact object data
                             impact_object_type = impact_object_data.get("typeId", "")  # Get impact object type
                             impact_object_signature = impact_object_data.get("mangling", "")  # Get impact object signature
-                            impact_object_source_location = impact_object_data["sourceLocations"][0]  # Extract source location
+                            impact_object_source_locations = impact_object_data.get("sourceLocations")
+                            if not impact_object_source_locations:
+                                object_dictionary["status"] = "failure"
+                                object_dictionary["message"] = f"failed because of reason: sourceLocations not available for impact object from Imaging API -> {impact_object_url}"
+                                print(object_dictionary["message"])
+                                engine_output["objects"].append(object_dictionary)
+                                continue  # Skip this impact object
+                            impact_object_source_location = impact_object_source_locations[0]  # Extract source location
                             impact_object_source_path = impact_object_source_location["filePath"]  # Get source file path
                             impact_object_field_id = int(impact_object_source_location["fileId"])  # Get file ID
                             impact_object_start_line = int(impact_object_source_location["startLine"])  # Get start line number
@@ -119,6 +133,9 @@ class AppCodeFixer:
                                 return engine_output
 
                             impact_object_full_code = self.imaging.get_source('impact object', TenantName, ApplicationName, impact_object_field_id, impact_object_start_line, impact_object_end_line)
+                            if impact_object_full_code is None:
+                                logging.error(f"Failed to fetch impact object code using {impact_object_url}. Status code: 404 or not found.")
+                                impact_object_full_code = ""  # Or handle as needed
 
                         else:
                             impact_object_type = ""
@@ -356,7 +373,7 @@ class AppCodeFixer:
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
-            self.app_logger.log_error(e, "gen_code_connected_json")
+            self.app_logger.log_error("gen_code_connected_json", e)
             return engine_output
 
     def __check_dependent_code_json(

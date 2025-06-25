@@ -1,35 +1,35 @@
 class Config:
     # Model configs...
-    MODEL_NAME = "gpt-4o-mini"
-    MODEL_VERSION = "null"
-    MODEL_URL = "null"
-    MODEL_API_KEY = "null"
-    MODEL_MAX_INPUT_TOKENS = 128000
-    MODEL_MAX_OUTPUT_TOKENS = 16384
-    MODEL_INVOCATION_DELAY_IN_SECONDS = 10
+    MODEL_NAME = '${{API_PYTHON_MODEL_NAME}}'
+    MODEL_VERSION = ''
+    MODEL_URL = '${{API_PYTHON_MODEL_URL}}'
+    MODEL_API_KEY = '${{API_PYTHON_MODEL_API_KEY}}'
+    MODEL_MAX_INPUT_TOKENS = '${{API_PYTHON_MODEL_MAX_INPUT_TOKENS}}'
+    MODEL_MAX_OUTPUT_TOKENS = '${{API_PYTHON_MODEL_MAX_OUTPUT_TOKENS}}'
+    MODEL_INVOCATION_DELAY_IN_SECONDS = '${{API_PYTHON_MODEL_INVOCATION_DELAY_IN_SECONDS}}'
 
     # Imaging configs...
-    IMAGING_URL = "null"
-    IMAGING_API_KEY = ""
+    IMAGING_URL = '${{API_PYTHON_IMAGING_URL}}'
+    IMAGING_API_KEY = ''
 
     # MongoDB configs...
-    MONGODB_CONNECTION_STRING = "mongodb://localhost:27017"
-    MONGODB_DATABASE_NAME = "cast_queue_db"
+    MONGODB_CONNECTION_STRING =  '${{API_PYTHON_MONGO_CONNECTION_STRING}}'
+    MONGODB_DATABASE_NAME = '${{API_PYTHON_MONGO_DATABASE_NAME}}'
 
-    # Use queue mechanism
-    MQ_VENDOR = "mongodb"  # or "kafka" or "rabbitmq"
+    MAX_THREADS = '${{API_PYTHON_MODEL_MAX_THREADS}}'
+    PORT = '${{API_PYTHON_MODEL_PORT}}'
 
-    # RabbitMQ configs (if used)
-    RABBITMQ_HOST = "localhost"
+    # Use queue mechanism    
+    MQ_VENDOR = '${{API_PYTHON_MQ_VENDOR}}'
+
+    # RabbitMQ Configuration
+    RABBITMQ_HOST = ""
     RABBITMQ_PORT = 5672
     RABBITMQ_VHOST = "/"
     RABBITMQ_USER = "guest"
-    RABBITMQ_PASSWORD = "guest"
+    RABBITMQ_PASSWORD = ""
 
-    # Kafka configs (if used)
-    KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+      # Kafka configs (if used)
+    KAFKA_BOOTSTRAP_SERVERS = ""
     KAFKA_GROUP_ID = "cast_ai_group"
     KAFKA_AUTO_OFFSET_RESET = "earliest"
-
-    MAX_THREADS = 20
-    PORT = 8081

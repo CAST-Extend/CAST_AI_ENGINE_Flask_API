@@ -61,6 +61,7 @@ def request_worker():
                     "timestamp": time.time()
                 })
             else:
+                # print("[WORKER DEBUG] No queued document found in status_queue. Possible reasons: empty queue, filter mismatch, or race condition.")
                 time.sleep(1)
 
         except Exception as e:

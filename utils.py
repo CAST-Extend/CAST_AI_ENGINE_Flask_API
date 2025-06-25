@@ -60,4 +60,3 @@ def replace_lines(app_logger: AppLogger, lines, replacements):
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
         app_logger.log_error("replace_lines", e)
-
