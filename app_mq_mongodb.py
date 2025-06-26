@@ -15,7 +15,7 @@ class MongoDBMQ:
         self.queue_col.create_index("timestamp", expireAfterSeconds=86400)
 
     def publish(self, topic, message):
-        print(f"[MongoDBMQ] Publishing message to {topic}: {message}")
+        print(f"\n[MongoDBMQ] Publishing message to {topic}: {message}")
         with self.lock:
             if isinstance(message, str):
                 try:
@@ -34,7 +34,7 @@ class MongoDBMQ:
                 new_status = message_json.get("status")
 
                 if current_status in ["queued", "processing"] and new_status == "queued":
-                    print(f"[MongoDBMQ] Skipping re-queue: request {request_id} already in status '{current_status}'")
+                    print(f"\n[MongoDBMQ] Skipping re-queue: request {request_id} already in status '{current_status}'")
                     return
 
                 self.db[topic].replace_one(
@@ -42,7 +42,7 @@ class MongoDBMQ:
                     message_json,
                     upsert=True
                 )
-                print(f"[MongoDBMQ] Request {request_id} updated to status '{new_status}'")
+                print(f"\n[MongoDBMQ] Request {request_id} updated to status '{new_status}'")
             else:
                 self.db[topic].insert_one(message_json)
 
@@ -50,7 +50,7 @@ class MongoDBMQ:
         query = filter_by if filter_by else {"status": "queued"}
         doc = self.db[topic].find_one(query, sort=[("timestamp", 1)])
         if doc:
-            print(f"[MongoDBMQ] Fetched from {topic}: {doc}")
+            print(f"\n[MongoDBMQ] Fetched from {topic}: {doc}")
         return doc
 
     def update_status(self, topic, request_id, new_status):
@@ -59,17 +59,17 @@ class MongoDBMQ:
             {"$set": {"status": new_status, "processing_start": time.time(), "timestamp": time.time()}}
         )
         if result.modified_count == 1:
-            print(f"[MongoDBMQ] Updated request {request_id} to status '{new_status}'")
+            print(f"\n[MongoDBMQ] Updated request {request_id} to status '{new_status}'")
             return True
         else:
-            print(f"[MongoDBMQ] Failed to update request {request_id} to '{new_status}' (possibly already processed)")
+            print(f"\n[MongoDBMQ] Failed to update request {request_id} to '{new_status}' (possibly already processed)")
             return False
 
     def get_latest_status(self, topic, request_id):
         doc = self.db[topic].find({"request_id": request_id}).sort("timestamp", -1).limit(1)
         doc = list(doc)
         if doc:
-            print(f"[MongoDBMQ] Latest status for {request_id}: {doc[0]}")
+            print(f"\n[MongoDBMQ] Latest status for {request_id}: {doc[0]}")
             return doc[0]
         return None
 

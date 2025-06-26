@@ -29,26 +29,39 @@ ai_model = AppLLM(app_logger, app.config)
 imaging = AppImaging(app_logger, app.config)
 code_fixer = AppCodeFixer(app_logger, mongo_db, ai_model, imaging)
 
+def reset_processing_to_queued():
+    try:
+        mongo_db = AppMongoDb(app.config)
+        collection = mongo_db.get_collection("status_queue")
+
+        result = collection.update_many(
+            {"status": "processing"},
+            {"$set": {"status": "queued"}}
+        )
+        print(f"Resetting {result.modified_count} documents from 'processing' to 'queued'")
+    except Exception as e:
+        print("Error while executing function reset_processing_to_queued():- ", str(e))
+
 def get_mq():
     return AppMessageQueue(app_logger, app.config).open()
 
 def request_worker():
     queue = get_mq()
-    print('[WORKER] Background thread processor started.')
+    print('\n[WORKER] Background thread processor started.')
 
     while True:
         try:
             doc = queue.get("status_queue", filter_by={"status": "queued"})
             if doc:
                 request_id = doc.get("request_id")
-                retry_count = doc.get("retry_count", 0)
+                retry_count = int(doc.get("retry_count", 0)) + 1
 
                 success = queue.update_status("status_queue", request_id, "processing")
                 if not success:
                     time.sleep(0.5)
                     continue  # Another thread may have taken it
 
-                print(f"[WORKER] Processing: {request_id}")
+                print(f"\n[WORKER] Processing: {request_id}")
 
                 result = code_fixer.process_request_logic(request_id)
                 status = "completed" if result.get("status") == "success" else "failed"
@@ -57,28 +70,15 @@ def request_worker():
                     "request_id": request_id,
                     "status": status,
                     "retry_count": retry_count,
-                    "response": result,
                     "timestamp": time.time()
                 })
             else:
-                # print("[WORKER DEBUG] No queued document found in status_queue. Possible reasons: empty queue, filter mismatch, or race condition.")
+                # print("\n[WORKER DEBUG] No queued document found in status_queue. Possible reasons: empty queue, filter mismatch, or race condition.")
                 time.sleep(1)
 
         except Exception as e:
-            print(f"[WORKER ERROR] {e}")
+            print(f"\n[WORKER ERROR] {e}")
             time.sleep(2)
-
-worker_threads = []
-cpu_count = multiprocessing.cpu_count()
-NUM_WORKERS = min(2 * cpu_count, int(app.config["MAX_THREADS"]))
-
-print(f"Total number of CPU Cores - {cpu_count}")
-print(f"Total number of workers created - {NUM_WORKERS}")
-
-for _ in range(NUM_WORKERS):
-    worker_thread = Thread(target=request_worker, daemon=True)
-    worker_thread.start()
-    worker_threads.append(worker_thread)
 
 @app.route("/api-python/v1/")
 def home():
@@ -155,4 +155,18 @@ def list_pending_requests():
         return {"status": "error", "message": str(e), "code": 500}, 500
 
 if __name__ == "__main__":
+    reset_processing_to_queued()  # run only once on startup
+
+    worker_threads = []
+    cpu_count = multiprocessing.cpu_count()
+    NUM_WORKERS = min(2 * cpu_count, int(app.config["MAX_THREADS"]))
+
+    print(f"Total number of CPU Cores - {cpu_count}")
+    print(f"Total number of workers created - {NUM_WORKERS}")
+
+    for _ in range(NUM_WORKERS):
+        worker_thread = Thread(target=request_worker, daemon=True)
+        worker_thread.start()
+        worker_threads.append(worker_thread)
+
     app.run(debug=False, host="0.0.0.0", port=app.config["PORT"])
