@@ -15,6 +15,7 @@ from app_mongo import AppMongoDb
 from app_mq import AppMessageQueue
 from config import Config
 from threading import Thread
+from utils import get_timestamp
 from urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -38,7 +39,7 @@ def reset_processing_to_queued():
             {"status": "processing"},
             {"$set": {"status": "queued"}}
         )
-        print(f"Resetting {result.modified_count} documents from 'processing' to 'queued'")
+        print(f"Changed {result.modified_count} document(s) status from 'processing' to 'queued'....................................................................")
     except Exception as e:
         print("Error while executing function reset_processing_to_queued():- ", str(e))
 
@@ -54,7 +55,7 @@ def request_worker():
             doc = queue.get("status_queue", filter_by={"status": "queued"})
             if doc:
                 request_id = doc.get("request_id")
-                retry_count = int(doc.get("retry_count", 0)) + 1
+                # retry_count = int(doc.get("retry_count", 0)) + 1
 
                 success = queue.update_status("status_queue", request_id, "processing")
                 if not success:
@@ -63,15 +64,24 @@ def request_worker():
 
                 print(f"\n[WORKER] Processing: {request_id}")
 
-                result = code_fixer.process_request_logic(request_id)
+                start_datetime = get_timestamp()
+
+                result = code_fixer.process_request_logic(request_id, mongo_db)
                 status = "completed" if result.get("status") == "success" else "failed"
 
-                queue.publish("status_queue", {
-                    "request_id": request_id,
-                    "status": status,
-                    "retry_count": retry_count,
-                    "timestamp": time.time()
-                })
+                end_datetime = get_timestamp()
+
+                # Step 3: Fetch the document
+                collection = mongo_db.get_collection("status_queue")
+                doc = collection.find_one({"request_id": request_id})
+
+                if doc:
+                    #Update the document in MongoDB
+                    result = collection.update_one(
+                        {"request_id": request_id},
+                        {"$set": { "status": status, "start_datetime": start_datetime, "end_datetime": end_datetime}}
+                    )
+
             else:
                 # print("\n[WORKER DEBUG] No queued document found in status_queue. Possible reasons: empty queue, filter mismatch, or race condition.")
                 time.sleep(1)
@@ -100,8 +110,8 @@ def process_request(request_id):
         queue.publish("status_queue", {
             "request_id": request_id,
             "status": "queued",
-            "retry_count": 0,
-            "timestamp": time.time()
+            # "retry_count": 0,
+            # "timestamp": time.time()
         })
         return {
             "Request_Id": request_id,
@@ -128,9 +138,9 @@ def get_request_status(request_id):
         return {
             "Request_Id": request_id,
             "status": latest_doc.get("status", "unknown"),
-            "retry_count": latest_doc.get("retry_count", 0),
-            "last_updated": latest_doc.get("timestamp"),
-            "response": latest_doc.get("response", {}),
+            # "retry_count": latest_doc.get("retry_count", 0),
+            # "last_updated": latest_doc.get("timestamp"),
+            # "response": latest_doc.get("response", {}),
             "code": 200
         }
     except Exception as e:

@@ -6,16 +6,16 @@ import string
 from app_logger import AppLogger
 
 def get_timestamp():
-    return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return datetime.now().strftime("%Y/%m/%d T%H:%M:%S")
 
-def generate_unique_alphanumeric(app_logger: AppLogger, length = 24):
+def generate_unique_alphanumeric(request_id, app_logger: AppLogger, length = 24):
     try:
         characters = string.ascii_letters + string.digits
         return "".join(secrets.choice(characters) for _ in range(length))
     except Exception as e:
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
-        app_logger.log_error("generate_unique_alphanumeric", e)
+        app_logger.log_error("generate_unique_alphanumeric", e, request_id)
 
 # REM-DMA: unused, should be removed?
 # def fix_common_json_issues(app_logger: AppLogger, json_string):
@@ -45,7 +45,7 @@ def generate_unique_alphanumeric(app_logger: AppLogger, length = 24):
 #         print(f"An error occurred: {e}")
 #         app_logger.log_error("fix_common_json_issues", e)
 
-def replace_lines(app_logger: AppLogger, lines, replacements):
+def replace_lines(app_logger: AppLogger, lines, replacements, request_id):
     try:
         # Make a copy of the original lines to work with
         modified_lines = lines[:]
@@ -59,4 +59,4 @@ def replace_lines(app_logger: AppLogger, lines, replacements):
     except Exception as e:
         # Catch and print any errors that occur.
         print(f"An error occurred: {e}")
-        app_logger.log_error("replace_lines", e)
+        app_logger.log_error("replace_lines", e, request_id)

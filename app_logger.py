@@ -8,10 +8,11 @@ class AppLogger:
     def __init__(self, mongo_db: AppMongoDb):
         self.mongo_db = mongo_db
 
-    def log_error(self, function_name, exception):
+    def log_error(self, function_name, exception, requestid=None):
         from utils import get_timestamp
         collection = self.mongo_db.get_collection("ExceptionLog")
         error_data = {
+            "requestid": requestid,
             "function": function_name,
             "error": str(exception),
             "trace": traceback.format_exc(),

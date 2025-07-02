@@ -12,7 +12,8 @@ class MongoDBMQ:
         self.db = self.client[config["MONGODB_DATABASE_NAME"]]
         self.lock = threading.Lock()
         self.queue_col = self.db["status_queue"]
-        self.queue_col.create_index("timestamp", expireAfterSeconds=86400)
+        # self.queue_col.drop_index("timestamp")  # Drop the conflicting index
+        # self.queue_col.create_index("timestamp", expireAfterSeconds=60)
 
     def publish(self, topic, message):
         print(f"\n[MongoDBMQ] Publishing message to {topic}: {message}")
@@ -26,7 +27,7 @@ class MongoDBMQ:
                 message_json = message
 
             request_id = message_json.get("request_id")
-            message_json["timestamp"] = time.time()
+            # message_json["timestamp"] = time.time()
 
             if request_id:
                 existing_doc = self.db[topic].find_one({"request_id": request_id})
@@ -48,7 +49,7 @@ class MongoDBMQ:
 
     def get(self, topic, filter_by=None):
         query = filter_by if filter_by else {"status": "queued"}
-        doc = self.db[topic].find_one(query, sort=[("timestamp", 1)])
+        doc = self.db[topic].find_one(query)
         if doc:
             print(f"\n[MongoDBMQ] Fetched from {topic}: {doc}")
         return doc
@@ -56,7 +57,7 @@ class MongoDBMQ:
     def update_status(self, topic, request_id, new_status):
         result = self.db[topic].update_one(
             {"request_id": request_id, "status": "queued"},
-            {"$set": {"status": new_status, "processing_start": time.time(), "timestamp": time.time()}}
+            {"$set": {"status": new_status}}
         )
         if result.modified_count == 1:
             print(f"\n[MongoDBMQ] Updated request {request_id} to status '{new_status}'")
@@ -66,7 +67,7 @@ class MongoDBMQ:
             return False
 
     def get_latest_status(self, topic, request_id):
-        doc = self.db[topic].find({"request_id": request_id}).sort("timestamp", -1).limit(1)
+        doc = self.db[topic].find({"request_id": request_id})
         doc = list(doc)
         if doc:
             print(f"\n[MongoDBMQ] Latest status for {request_id}: {doc[0]}")

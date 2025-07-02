@@ -30,7 +30,7 @@ class AppLLM:
             print(f"Using fallback encoding 'cl100k_base'")
 
     # private methods
-    def count_tokens(self, prompt):
+    def count_tokens(self, prompt, request_id):
         try:
             """
             Counts the number of tokens in the given prompt using the token encoding for the specified AI model.
@@ -50,7 +50,7 @@ class AppLLM:
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
-            self.app_logger.log_error("count_tokens", e)
+            self.app_logger.log_error("count_tokens", e, request_id)
 
     def truncate_prompt(self, prompt, max_tokens):
         """
@@ -66,6 +66,7 @@ class AppLLM:
 
     def ask_ai_model(
         self,
+        request_id,
         prompt_content,
         json_resp,
         max_tokens,
@@ -128,11 +129,11 @@ class AppLLM:
             #     json.dump(payload, f, indent=4)
 
             # Check prompt token length before sending to LLM
-            prompt_token_count = self.count_tokens(prompt_content)
+            prompt_token_count = self.count_tokens(prompt_content, request_id)
             if prompt_token_count > self.model_max_input_tokens:
                 self.app_logger.log_error(
                     f"Prompt too long: {prompt_token_count} tokens (limit: {self.model_max_input_tokens})",
-                    f"ask_ai_model ObjectID={ObjectID}"
+                    f"ask_ai_model ObjectID={ObjectID}", request_id
                 )
                 # Optionally, truncate the prompt automatically
                 prompt_content, prompt_token_count = self.truncate_prompt(prompt_content, self.model_max_input_tokens)
@@ -213,5 +214,5 @@ class AppLLM:
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
-            self.app_logger.log_error(e, "ask_ai_model")
+            self.app_logger.log_error(e, "ask_ai_model", request_id)
             return None, f"{e}. Please Resend the request...", tokens

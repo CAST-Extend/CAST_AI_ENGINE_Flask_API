@@ -26,7 +26,9 @@ class AppCodeFixer:
         ObjectID,
         PromptContent,
         json_resp,
-        engine_output
+        engine_output,
+        request_id,
+        mongo_db
     ):
         try:
 
@@ -73,7 +75,7 @@ class AppCodeFixer:
                 object_end_line = source_location["endLine"]  # Get end line number
 
                 # fetch object code
-                obj_code = self.imaging.get_source('object', TenantName, ApplicationName, object_field_id, object_start_line, object_end_line)
+                obj_code = self.imaging.get_source('object', TenantName, ApplicationName, object_field_id, object_start_line, object_end_line, request_id)
                 if obj_code is None:
                     object_dictionary["status"] = "failure"
                     object_dictionary["message"] = f"Failed to fetch object code using Imaging API for fileId={object_field_id}, startLine={object_start_line}, endLine={object_end_line}."
@@ -132,7 +134,7 @@ class AppCodeFixer:
                                 engine_output["objects"].append(object_dictionary)
                                 return engine_output
 
-                            impact_object_full_code = self.imaging.get_source('impact object', TenantName, ApplicationName, impact_object_field_id, impact_object_start_line, impact_object_end_line)
+                            impact_object_full_code = self.imaging.get_source('impact object', TenantName, ApplicationName, impact_object_field_id, impact_object_start_line, impact_object_end_line, request_id)
                             if impact_object_full_code is None:
                                 logging.error(f"Failed to fetch impact object code using {impact_object_url}. Status code: 404 or not found.")
                                 impact_object_full_code = ""  # Or handle as needed
@@ -154,7 +156,7 @@ class AppCodeFixer:
                             # Calculate start and end lines for impact object code
                             impact_object_bookmark_start_line = max(int(bookmark.get("startLine", 1)) - 1, 0)
                             impact_object_bookmark_end_line = max(int(bookmark.get("endLine", 1)) - 1, 0)
-                            impact_object_bookmark_code = self.imaging.get_source('impact object bookmark', TenantName, ApplicationName,impact_object_bookmark_field_id,impact_object_bookmark_start_line,impact_object_bookmark_end_line)
+                            impact_object_bookmark_code = self.imaging.get_source('impact object bookmark', TenantName, ApplicationName,impact_object_bookmark_field_id,impact_object_bookmark_start_line,impact_object_bookmark_end_line, request_id)
 
                         # Append the impact object data to the impacts DataFrame
                         new_impact_row = pd.DataFrame(
@@ -235,8 +237,8 @@ class AppCodeFixer:
             messages = [{"role": "user", "content": prompt_content}]
 
             # Count tokens for the AI model's input
-            code_token = self.llm.count_tokens(str(obj_code))
-            prompt_token = self.llm.count_tokens("\n".join([json.dumps(m) for m in messages]))
+            code_token = self.llm.count_tokens(str(obj_code), request_id)
+            prompt_token = self.llm.count_tokens("\n".join([json.dumps(m) for m in messages]), request_id)
 
             # Determine target response size
             target_response_size = int(code_token * 1.2 + 500)
@@ -246,10 +248,11 @@ class AppCodeFixer:
             # if True:
                 # Ask the AI model for a response
                 response_content, ai_msg, tokens = self.llm.ask_ai_model(
+                    request_id,
                     prompt_content,
                     json_resp,
                     target_response_size,
-                    ObjectID,
+                    ObjectID
                 )
                 logging.info(f"Response Content: {response_content}")
 
@@ -281,7 +284,7 @@ class AppCodeFixer:
                         end_line = object_end_line
 
                         # fetch object code
-                        file_content = self.imaging.get_file('object', TenantName, ApplicationName, object_field_id)
+                        file_content = self.imaging.get_file('object', TenantName, ApplicationName, object_field_id, request_id)
 
                         file_content = file_content.splitlines(keepends=True)
                         # file_path = RepoName + object_source_path.split(RepoName)[-1]
@@ -330,7 +333,7 @@ class AppCodeFixer:
                                                     for the following reason: [{response_content['comment'] if response_content['impact_comment'] == 'NA' else response_content['impact_comment']}]."""
 
                                     # fetch object code
-                                    dep_object_file_content = self.imaging.get_file('dep object', TenantName, ApplicationName, int(row["object_file_id"]))
+                                    dep_object_file_content = self.imaging.get_file('dep object', TenantName, ApplicationName, int(row["object_file_id"]), request_id)
 
                                     dep_object_file_content = dep_object_file_content.splitlines(keepends=True)
                                     # dep_object_file_path = RepoName + object_source_path.split(RepoName)[-1]
@@ -349,7 +352,9 @@ class AppCodeFixer:
                                         RepoName,
                                         dep_object_file_content,
                                         dep_object_file_path,
-                                        engine_output
+                                        engine_output,
+                                        request_id,
+                                        mongo_db
                                     )
 
                                     engine_output["objects"].append(object_data)
@@ -373,8 +378,31 @@ class AppCodeFixer:
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
-            self.app_logger.log_error("gen_code_connected_json", e)
+            self.app_logger.log_error("gen_code_connected_json", e, request_id)
             return engine_output
+        finally:
+            collection = mongo_db.get_collection("status_queue")
+            # Step 2: Inputs
+            new_object_id = object_dictionary['objectid']
+            new_status = object_dictionary['status']
+
+            # Step 3: Fetch the document
+            doc = collection.find_one({"request_id": request_id})
+
+            if doc:
+                # Step 4: Get or initialize objects_list
+                objects_list = doc.get("objects_list", {})
+                
+                # Step 5: Append or update object_id with status
+                objects_list[new_object_id] = new_status
+
+                # Step 6: Update the document in MongoDB
+                result = collection.update_one(
+                    {"request_id": request_id},
+                    {"$set": {"objects_list": objects_list}}
+                )
+
+                print(f"Updated document. Modified count: {result.modified_count}")
 
     def __check_dependent_code_json(
         self,
@@ -390,7 +418,9 @@ class AppCodeFixer:
         RepoName,
         dep_object_file_content,
         dep_object_file_path,
-        engine_output
+        engine_output,
+        request_id,
+        mongo_db
     ):
         try:
             object_dictionary = {"objectid": dep_object_id, "status": "", "message": "", "dependent_info":f"this object is depenedent on ObjectID-{ObjectID}"}
@@ -432,8 +462,8 @@ class AppCodeFixer:
             messages = [{"role": "user", "content": prompt_content}]
 
             # Count tokens for the AI model's input
-            code_token = self.llm.count_tokens(str(dep_obj_code))
-            prompt_token = self.llm.count_tokens("\n".join([json.dumps(m) for m in messages]))
+            code_token = self.llm.count_tokens(str(dep_obj_code), request_id)
+            prompt_token = self.llm.count_tokens("\n".join([json.dumps(m) for m in messages]), request_id)
 
             # Determine target response size
             target_response_size = int(code_token * 1.2 + 500)
@@ -443,10 +473,11 @@ class AppCodeFixer:
             # if True:
                 # Ask the AI model for a response
                 response_content, ai_msg, tokens = self.llm.ask_ai_model(
+                    request_id,
                     prompt_content,
                     json_dep_resp,
                     target_response_size,
-                    dep_object_id,
+                    dep_object_id
                 )
                 logging.info(f"Response Content: {response_content}")
 
@@ -511,10 +542,33 @@ class AppCodeFixer:
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
-            self.app_logger.log_error(e, "check_dependent_code_json")
+            self.app_logger.log_error(e, "check_dependent_code_json", request_id)
             return object_dictionary, content_info_dictionary, engine_output
+        finally:
+            collection = mongo_db.get_collection("status_queue")
+            # Step 2: Inputs
+            new_object_id = object_dictionary['objectid']
+            new_status = object_dictionary['status']
 
-    def __resend_fullfile_to_ai(self, full_code):
+            # Step 3: Fetch the document
+            doc = collection.find_one({"request_id": request_id})
+
+            if doc:
+                # Step 4: Get or initialize objects_list
+                objects_list = doc.get("objects_list", {})
+                
+                # Step 5: Append or update object_id with status
+                objects_list[new_object_id] = new_status
+
+                # Step 6: Update the document in MongoDB
+                result = collection.update_one(
+                    {"request_id": request_id},
+                    {"$set": {"objects_list": objects_list}}
+                )
+
+                print(f"Updated document. Modified count: {result.modified_count}")
+
+    def __resend_fullfile_to_ai(self, full_code, request_id):
         try:
 
             json_resp = """
@@ -552,8 +606,8 @@ class AppCodeFixer:
             messages = [{"role": "user", "content": prompt_content}]
 
             # Count tokens for the AI model's input
-            code_token = self.llm.count_tokens(str(full_code))
-            prompt_token = self.llm.count_tokens("\n".join([json.dumps(m) for m in messages]))
+            code_token = self.llm.count_tokens(str(full_code), request_id)
+            prompt_token = self.llm.count_tokens("\n".join([json.dumps(m) for m in messages]), request_id)
 
             # Determine target response size
             target_response_size = int(code_token * 1.2 + 500)
@@ -563,9 +617,10 @@ class AppCodeFixer:
             if prompt_token < (self.llm.model_max_input_tokens - target_response_size) and target_response_size < self.llm.model_max_output_tokens:
                 # Ask the AI model for a response
                 response_content, _, tokens = self.llm.ask_ai_model(
+                    request_id,
                     prompt_content,
                     json_resp,
-                    max_tokens=target_response_size,
+                    max_tokens=target_response_size
                 )
                 logging.info(f"Response Content: {response_content}")
                 
@@ -580,10 +635,10 @@ class AppCodeFixer:
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
-            self.app_logger.log_error(e, "resend_fullfile_to_ai")
+            self.app_logger.log_error(e, "resend_fullfile_to_ai", request_id)
 
     # Function containing the original processing logic (refactored for reuse)
-    def process_request_logic(self, request_id):
+    def process_request_logic(self, request_id, mongo_db):
         # Reset flag to avoid pausing on the first call
         self.llm.first_prompt = True
 
@@ -667,7 +722,9 @@ class AppCodeFixer:
                                                 ObjectID,
                                                 PromptContent,
                                                 json_resp,
-                                                engine_output
+                                                engine_output,
+                                                request_id,
+                                                mongo_db
                                             )
 
 
@@ -692,12 +749,12 @@ class AppCodeFixer:
                                 replacements[tuple_value] = [line + "\n" for line in replacements[tuple_value]]
 
                             # Run the function with the lines and replacements
-                            modified_lines = replace_lines(self.app_logger, lines, replacements)
+                            modified_lines = replace_lines(self.app_logger, lines, replacements, request_id)
                             modified_lines = "".join(modified_lines)
-                            modified_lines = self.__resend_fullfile_to_ai(modified_lines)
+                            modified_lines = self.__resend_fullfile_to_ai(modified_lines, request_id)
                         
                             # Generate a unique 24-character alphanumeric string
-                            unique_string = generate_unique_alphanumeric(self.app_logger)
+                            unique_string = generate_unique_alphanumeric(request_id, self.app_logger)
                             content["fileid"] = unique_string
 
                             file_path = content["filefullname"].replace('\\','/')
@@ -756,7 +813,7 @@ class AppCodeFixer:
                 
                 else:
                     print(f"Req -> {request_id} Not Found or Incorrect EngineInput!")
-                    self.app_logger.log_error(f"Req -> {request_id} Not Found or Incorrect EngineInput!", "process_request")
+                    self.app_logger.log_error(f"Req -> {request_id} Not Found or Incorrect EngineInput!", "process_request", request_id)
                     return ({
                         "Request_Id": request_id,
                         "status": "failed",
@@ -767,7 +824,7 @@ class AppCodeFixer:
         except Exception as e:
             # Catch and print any errors that occur.
             print(f"An error occurred: {e}")
-            self.app_logger.log_error("process_request", e)
+            self.app_logger.log_error("process_request", e, request_id)
             return {
                 "Request_Id": request_id,
                 "status": "failed",
